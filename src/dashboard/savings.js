@@ -8,7 +8,7 @@
 // the payback date at the pace of the last 12 months, the CO2 avoided. The
 // chart: the savings of each of the last 12 months.
 //
-// Content budget of the core: 1 heading, 1 chart, 5 tiles, 1 status.
+// Content budget of the core: 1 heading (a title of its own only), 1 chart, 5 tiles, 1 status.
 // -----------------------------------------------------------------------------
 
 import { WIDGET_COLORS } from '@gladysassistant/integration-sdk';
@@ -30,6 +30,7 @@ import {
   round,
   siteSelection,
   tile,
+  headingOf,
   titleOf,
 } from './common.js';
 
@@ -105,7 +106,7 @@ export function savingsContent(site, boxes, { now, config, title }) {
     tariff,
   });
 
-  const components = [{ type: 'text', variant: 'heading', text: title }];
+  const components = headingOf(title);
   const series = monthlySeries(boxes, now, timeZone, 12).filter((month) => month.kwh !== null);
   if (series.length > 0) {
     components.push({
@@ -222,7 +223,7 @@ export const savingsWidget = {
     return savingsContent(site, boxes.length > 0 ? boxes : all, {
       now: Date.now(),
       config,
-      title: titleOf(settings, T('Solar savings', 'Économies solaires')),
+      title: titleOf(settings, null),
     });
   },
 };

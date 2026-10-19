@@ -14,13 +14,12 @@
 // total otherwise. Then the boxes that produce clearly less than the others,
 // and the assignment mistakes.
 //
-// Content budget of the core: 1 heading, 1 chart, 5 tiles, 1 status.
+// Content budget of the core: 1 heading (a title of its own only), 1 chart, 5 tiles, 1 status.
 // -----------------------------------------------------------------------------
 
 import { WIDGET_COLORS } from '@gladysassistant/integration-sdk';
 
 import { powerSeries, siteFigures, underperformers } from '../production.js';
-import { dayKey } from '../time.js';
 import {
   T,
   UNKNOWN,
@@ -36,7 +35,9 @@ import {
   round,
   selectionAlerts,
   siteSelection,
+  startOfToday,
   tile,
+  headingOf,
   titleOf,
 } from './common.js';
 
@@ -116,12 +117,7 @@ function balanceRow({ spread, highest, warning }) {
 
 /** The power curve of the day: one series per phase, or the total. */
 export function powerChart(site, selection, now, timeZone) {
-  // From the last local midnight: the samples of the day only.
-  const today = dayKey(now, timeZone);
-  let from = now - 24 * 60 * 60 * 1000;
-  while (dayKey(from, timeZone) !== today) {
-    from += 5 * 60 * 1000;
-  }
+  const from = startOfToday(now, timeZone);
   const toPoints = (boxes) =>
     powerSeries(site.store, boxes, from)
       .slice(-MAX_CHART_POINTS)
@@ -156,7 +152,7 @@ export function siteContent(site, selection, { now, config, title, threshold, sh
   const timeZone = config.timezone;
   const { boxes } = selection;
   const figures = siteFigures(boxes, now, timeZone);
-  const components = [{ type: 'text', variant: 'heading', text: title }];
+  const components = headingOf(title);
   if (showChart) {
     const chart = powerChart(site, selection, now, timeZone);
     if (chart) {
@@ -175,7 +171,7 @@ export function siteContent(site, selection, { now, config, title, threshold, sh
       max: 100,
       unit: '%',
       label: T('Of peak power', 'De la puissance crête'),
-      color: figures.loadPercent === null ? WIDGET_COLORS.NEUTRAL : WIDGET_COLORS.WARNING,
+      color: figures.loadPercent === null ? WIDGET_COLORS.NEUTRAL : WIDGET_COLORS.PRIMARY,
     },
   );
 
@@ -242,7 +238,7 @@ export const siteWidget = {
     return siteContent(site, selection, {
       now: Date.now(),
       config,
-      title: titleOf(settings, T('Solar installation', 'Installation solaire')),
+      title: titleOf(settings, null),
       threshold: thresholdOf(settings),
       showChart: settings.show_chart !== false,
     });

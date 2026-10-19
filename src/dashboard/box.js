@@ -1,17 +1,27 @@
 // -----------------------------------------------------------------------------
 // The `box` widget: one Beem box (one kit) on a card.
 //
-// Live tiles bound to the device features (they follow the published states
+// A live tile bound to the power feature (it follows the published states
 // without waiting for the TTL), a gauge of the power over the peak power,
 // the day / month figures and the yield (kWh per kWp, comparable between a
-// 300 W and a 500 W kit), the power curve of the day from the history Gladys
-// keeps, and the status: signal, last report, panels, year and lifetime.
+// 300 W and a 500 W kit). The curve of the day is the box's 5-minute average
+// power (src/store.js) next to the power it would have at the median load
+// of the other boxes: a box below its peers, or cut, shows at a glance.
+// The status: last report, signal, cuts of the day, yield against the other
+// boxes, panels, year and lifetime.
 // -----------------------------------------------------------------------------
 
 import { WIDGET_COLORS } from '@gladysassistant/integration-sdk';
 
 import { FEATURE, boxIds } from '../devices/box.js';
-import { boxFigures, underperformers } from '../production.js';
+import {
+  MIN_YIELD_TO_COMPARE,
+  boxFigures,
+  comparedSeries,
+  cutsOf,
+  median,
+  underperformers,
+} from '../production.js';
 import { localTime } from '../time.js';
 import {
   T,
@@ -20,12 +30,17 @@ import {
   kwhText,
   kwhValue,
   messageContent,
+  monthLabel,
+  startOfToday,
   round,
   tile,
   titleOf,
 } from './common.js';
 
 export const BOX_WIDGET = 'box';
+
+// Points of an inline chart series the core keeps.
+const MAX_CHART_POINTS = 300;
 
 const BOX_NOT_FOUND = T(
   'This Beem box no longer exists: pick another one in the widget settings.',
@@ -56,7 +71,21 @@ export function signalRow(dbm) {
   };
 }
 
-/** Panels row: `3 × 300 W · 900 Wp · 180° / 30°`. */
+const COMPASS = {
+  en: ['S', 'SW', 'W', 'NW', 'N', 'NE', 'E', 'SE'],
+  fr: ['S', 'SO', 'O', 'NO', 'N', 'NE', 'E', 'SE'],
+};
+
+/**
+ * The compass point of a panel azimuth as the Beem application stores it:
+ * degrees from the south, negative to the east (-90 east, 90 west).
+ */
+export function compassOf(azimuth, language = 'en') {
+  const sector = Math.round((((azimuth % 360) + 360) % 360) / 45) % 8;
+  return COMPASS[language][sector];
+}
+
+/** Panels row: `3 × 300 W · 900 Wp · SE -30° · ∠30°`. */
 function panelsRow(box) {
   const parts = [];
   if (box.panels.length > 0) {
@@ -69,13 +98,20 @@ function panelsRow(box) {
     parts.push(`${box.peakPowerW} Wp`);
   }
   const oriented = box.panels.find((panel) => panel.orientation !== null);
-  if (oriented) {
-    parts.push(`${oriented.orientation}°${oriented.tilt === null ? '' : ` / ${oriented.tilt}°`}`);
-  }
+  const value = (language) => {
+    const all = [...parts];
+    if (oriented) {
+      all.push(`${compassOf(oriented.orientation, language)} ${oriented.orientation}°`);
+      if (oriented.tilt !== null) {
+        all.push(`∠${oriented.tilt}°`);
+      }
+    }
+    return all.length > 0 ? all.join(' · ') : UNKNOWN;
+  };
   return {
     label: T('Panels', 'Panneaux'),
     icon: 'sun',
-    value: parts.length > 0 ? parts.join(' · ') : UNKNOWN,
+    value: T(value('en'), value('fr')),
     color: WIDGET_COLORS.NEUTRAL,
   };
 }
@@ -108,19 +144,18 @@ function reportRow(box, timeZone) {
  * @param {Array<object>} all every snapshot (peer comparison)
  * @param {{ now: number, config: object, title: string|object }} options
  */
-export function boxContent(gladys, box, all, { now, config, title }) {
+export function boxContent(gladys, site, box, { now, config, title }) {
   const ids = boxIds(gladys, box.id);
-  const figures = boxFigures(box, now, config.timezone);
-  const components = [
-    { type: 'text', variant: 'heading', text: title },
-    {
-      type: 'chart',
-      device_features: [ids.feature(FEATURE.POWER)],
-      interval: 'last-day',
-      chart_type: 'area',
-      title: T('Power today', 'Puissance du jour'),
-      unit: 'W',
-    },
+  const all = site.snapshots();
+  const timeZone = config.timezone;
+  const figures = boxFigures(box, now, timeZone);
+  const today = startOfToday(now, timeZone);
+  const components = [{ type: 'text', variant: 'heading', text: title }];
+  const chart = powerChart(site.store, box, all, today);
+  if (chart) {
+    components.push(chart);
+  }
+  components.push(
     {
       type: 'gauge',
       value: figures.loadPercent ?? 0,
@@ -128,7 +163,7 @@ export function boxContent(gladys, box, all, { now, config, title }) {
       max: 100,
       unit: '%',
       label: T('Of peak power', 'De la puissance crête'),
-      color: figures.loadPercent === null ? WIDGET_COLORS.NEUTRAL : WIDGET_COLORS.WARNING,
+      color: figures.loadPercent === null ? WIDGET_COLORS.NEUTRAL : WIDGET_COLORS.PRIMARY,
     },
     {
       type: 'value',
@@ -139,40 +174,136 @@ export function boxContent(gladys, box, all, { now, config, title }) {
     tile(kwhValue(figures.todayKwh), 'kWh', T('Today', "Aujourd'hui"), 'zap'),
     tile(kwhValue(figures.monthKwh), 'kWh', T('This month', 'Ce mois-ci'), 'calendar'),
     tile(round(figures.yieldToday, 2), 'kWh/kW', T('Yield today', 'Rendement du jour'), 'award'),
-  ];
+  );
 
-  const rows = [reportRow(box, config.timezone), signalRow(box.reading.dbm), panelsRow(box)];
+  const rows = [reportRow(box, timeZone), signalRow(box.reading.dbm)];
+  rows.push(cutsRow(cutsOf(site.store, box, all, today), timeZone));
+  const comparison = comparisonRow(box, all, now, config);
+  if (comparison) {
+    rows.push(comparison);
+  }
+  rows.push(panelsRow(box));
+  rows.push(
+    figures.yesterdayKwh === null
+      ? {
+          label: T('This year', 'Cette année'),
+          icon: 'calendar',
+          value: kwhText(figures.yearKwh),
+          color: WIDGET_COLORS.NEUTRAL,
+        }
+      : {
+          label: T('Yesterday · this year', 'Hier · cette année'),
+          icon: 'calendar',
+          value: `${kwhText(figures.yesterdayKwh)} · ${kwhText(figures.yearKwh)}`,
+          color: WIDGET_COLORS.NEUTRAL,
+        },
+  );
+  const first = Object.entries(box.history.months)
+    .filter(([, wh]) => wh > 0)
+    .map(([key]) => key)
+    .sort()[0];
   rows.push({
-    label: T('Yesterday · this year', 'Hier · cette année'),
-    icon: 'calendar',
-    value: `${kwhText(figures.yesterdayKwh)} · ${kwhText(figures.yearKwh)}`,
-    color: WIDGET_COLORS.NEUTRAL,
-  });
-  rows.push({
-    label: T('Since the first month known', 'Depuis le premier mois connu'),
+    label: first
+      ? T(`Since ${monthLabel(first).en}`, `Depuis ${monthLabel(first).fr}`)
+      : T('In total', 'Au total'),
     icon: 'database',
     value: kwhText(figures.lifetimeKwh),
     color: WIDGET_COLORS.NEUTRAL,
   });
+  components.push({ type: 'status', items: fitRows(rows) });
+  return { ttl_seconds: 60, components };
+}
+
+/**
+ * The curve of the day: the box's 5-minute averages and the power it would
+ * have at the median load of the other boxes. Null before any sample.
+ */
+export function powerChart(store, box, all, from) {
+  const series = comparedSeries(store, box, all, from);
+  const own = series
+    .filter((point) => point.w !== null)
+    .map((point) => ({ t: new Date(point.t).toISOString(), v: point.w }));
+  if (own.length === 0) {
+    return null;
+  }
+  const expected = series
+    .filter((point) => point.expected !== null)
+    .map((point) => ({ t: new Date(point.t).toISOString(), v: point.expected }));
+  return {
+    type: 'chart',
+    series: [
+      { name: T('This box', 'Cette box'), points: own.slice(-MAX_CHART_POINTS) },
+      ...(expected.length > 0
+        ? [{ name: T('Expected', 'Attendu'), points: expected.slice(-MAX_CHART_POINTS) }]
+        : []),
+    ],
+    chart_type: 'line',
+    title: T('Power today', 'Puissance du jour'),
+    unit: 'W',
+    now_marker: true,
+  };
+}
+
+/** Cuts row: `3 · last 09:12`, in warning when there were some. */
+export function cutsRow({ count, lastAt }, timeZone) {
+  if (count === 0) {
+    return {
+      label: T('Cuts today', "Coupures aujourd'hui"),
+      icon: 'activity',
+      value: T('None', 'Aucune'),
+      color: WIDGET_COLORS.SUCCESS,
+    };
+  }
+  const time = localTime(lastAt, timeZone);
+  return {
+    label: T('Cuts today', "Coupures aujourd'hui"),
+    icon: 'wifi-off',
+    value: T(`${count} · last ${time}`, `${count} · dernière ${time}`),
+    color: WIDGET_COLORS.WARNING,
+  };
+}
+
+/**
+ * The yield of the box today against the median of the boxes, or the
+ * underperformance alert (silent, low yield). Null with a single box.
+ */
+function comparisonRow(box, all, now, config) {
+  if (all.length < 2) {
+    return null;
+  }
+  const label = T('Against the other boxes', 'Face aux autres box');
   const flagged = underperformers(
     all,
     now,
     config.timezone,
     config.underperformance_threshold,
   ).find((entry) => entry.box.id === box.id);
-  if (flagged) {
-    rows.push({
-      label: T('Underperforming', 'Sous-production'),
+  if (flagged?.reason === 'silent') {
+    return {
+      label,
       icon: 'alert-triangle',
-      value:
-        flagged.reason === 'silent'
-          ? T('Silent while the others produce', 'Muette, les autres produisent')
-          : T(`${flagged.ratio} % of the other boxes`, `${flagged.ratio} % des autres box`),
-      color: WIDGET_COLORS.WARNING,
-    });
+      value: T('Silent while they produce', 'Muette, les autres produisent'),
+      color: WIDGET_COLORS.DANGER,
+    };
   }
-  components.push({ type: 'status', items: fitRows(rows) });
-  return { ttl_seconds: 60, components };
+  const own = boxFigures(box, now, config.timezone).yieldToday;
+  const middle = median(all.map((other) => boxFigures(other, now, config.timezone).yieldToday));
+  if (own === null || middle === null || !(middle > 0)) {
+    return { label, icon: 'bar-chart-2', value: UNKNOWN, color: WIDGET_COLORS.NEUTRAL };
+  }
+  const percent = Math.round((own / middle) * 100);
+  return {
+    label,
+    icon: flagged ? 'alert-triangle' : 'bar-chart-2',
+    value: T(`${percent} % of the median`, `${percent} % de la médiane`),
+    // Too early or too dark to compare: shown, not judged.
+    color:
+      middle < MIN_YIELD_TO_COMPARE
+        ? WIDGET_COLORS.NEUTRAL
+        : flagged
+          ? WIDGET_COLORS.WARNING
+          : WIDGET_COLORS.SUCCESS,
+  };
 }
 
 export const boxWidget = {
@@ -186,7 +317,7 @@ export const boxWidget = {
     if (!box) {
       return messageContent(BOX_NOT_FOUND);
     }
-    return boxContent(gladys, box, all, {
+    return boxContent(gladys, site, box, {
       now: Date.now(),
       config,
       title: titleOf(settings, box.name),

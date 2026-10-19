@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 
 import { validateWidgetContent } from '@gladysassistant/integration-sdk';
 
-import { boxContent } from '../src/dashboard/box.js';
+import { boxContent, compassOf, cutsRow } from '../src/dashboard/box.js';
 import { siteSelection } from '../src/dashboard/common.js';
 import { historyContent, yearOverYear } from '../src/dashboard/history.js';
 import { savingsContent } from '../src/dashboard/savings.js';
 import { phaseBalance, siteContent } from '../src/dashboard/site.js';
 import { boxIds } from '../src/devices/box.js';
+import { cutsOf } from '../src/production.js';
 import { WIDGETS } from '../src/widgets.js';
 import { setupSite } from './helpers/setup.js';
 import { summary, threePhaseBoxes } from './helpers/fakeBeem.js';
@@ -65,7 +66,7 @@ const text = (value) => (typeof value === 'string' ? value : value.en);
 
 test('the box widget is rendered exactly as sent and binds its live tiles', async () => {
   const { gladys, site } = await producingSite();
-  const content = boxContent(gladys, site.snapshots()[0], site.snapshots(), {
+  const content = boxContent(gladys, site, site.snapshots()[0], {
     now: NOON,
     config: site.config(),
     title: 'Beem On L1',
@@ -77,7 +78,7 @@ test('the box widget is rendered exactly as sent and binds its live tiles', asyn
   const bound = content.components.flatMap(
     (c) => c.device_features ?? (c.device_feature ? [c.device_feature] : []),
   );
-  assert.ok(bound.length >= 2);
+  assert.ok(bound.length >= 1);
   for (const id of bound) {
     assert.ok(published.has(id), `unknown feature ${id}`);
   }
@@ -198,4 +199,79 @@ test('the box widget of a deleted box says so', async () => {
   const { gladys, site } = await producingSite();
   const content = await WIDGETS.box.get(gladys, { settings: { device: 'ext:gone' }, site });
   assert.match(content.components[0].text.en, /no longer exists/);
+});
+
+test('the box widget compares the box with the others and draws the expected curve', async () => {
+  const { gladys, site } = await producingSite();
+  const box = site.snapshots().find((snapshot) => snapshot.id === '201');
+  const content = boxContent(gladys, site, box, { now: NOON, config: site.config(), title: 'B' });
+  const chart = content.components.find((component) => component.type === 'chart');
+  assert.deepEqual(
+    chart.series.map((series) => series.name.en),
+    ['This box', 'Expected'],
+  );
+  // A load close to its peers': the expected curve is close to its own.
+  const [own, expected] = chart.series.map((series) => series.points.at(-1).v);
+  assert.ok(Math.abs(own - expected) / own < 0.1, `${own} vs ${expected}`);
+  const rows = statusOf(content).items;
+  const comparison = rows.find((item) => text(item.label) === 'Against the other boxes');
+  assert.match(comparison.value.en, /% of the median/);
+  assert.ok(
+    rows.some((item) => text(item.label) === 'This year'),
+    'yesterday unknown: hidden',
+  );
+  assert.ok(rows.some((item) => text(item.label) === 'Since Oct 2025'));
+});
+
+test('a box that cuts out while the others produce counts its cuts', async () => {
+  const { gladys, site, beem, clock } = await producingSite();
+  const read = async (at, cut) => {
+    clock.now = at;
+    beem.state.summaries['2026-10'] = threePhaseBoxes()
+      .filter((box) => !(cut && box.id === 201))
+      .map((box) => summary({ boxId: box.id, power: 500, day: 3000, month: 41000, at }));
+    await site.refresh();
+  };
+  const step = 5 * 60_000;
+  // Two cuts: absent from the summary for 10 min, then 5 min; back since.
+  const pattern = [true, true, false, true, false, false];
+  for (const [i, cut] of pattern.entries()) {
+    await read(NOON + (i + 1) * step, cut);
+  }
+  const box = site.snapshots().find((snapshot) => snapshot.id === '201');
+  const from = Date.parse('2026-10-18T22:00:00.000Z');
+  const cuts = cutsOf(site.store, box, site.snapshots(), from);
+  assert.equal(cuts.count, 2);
+  assert.equal(cuts.lastAt, NOON + 4 * step);
+  assert.deepEqual(cutsRow(cuts, 'Europe/Paris').value, {
+    en: '2 · last 12:20',
+    fr: '2 · dernière 12:20',
+  });
+  const content = boxContent(gladys, site, box, {
+    now: clock.now,
+    config: site.config(),
+    title: 'B',
+  });
+  assert.deepEqual(validateWidgetContent(content), []);
+});
+
+test('the panel azimuth reads as a compass point', () => {
+  assert.equal(compassOf(0, 'fr'), 'S');
+  assert.equal(compassOf(-30, 'en'), 'SE');
+  assert.equal(compassOf(-90, 'fr'), 'E');
+  assert.equal(compassOf(90, 'fr'), 'O');
+  assert.equal(compassOf(180, 'en'), 'N');
+});
+
+test('the site, savings and history widgets repeat no default title', async () => {
+  const { gladys, site } = await producingSite();
+  for (const key of ['site', 'savings', 'history']) {
+    const content = await WIDGETS[key].get(gladys, { settings: {}, site });
+    assert.ok(
+      !content.components.some((component) => component.variant === 'heading'),
+      `${key} has no heading`,
+    );
+    const titled = await WIDGETS[key].get(gladys, { settings: { title: 'Mine' }, site });
+    assert.equal(titled.components[0].text, 'Mine');
+  }
 });

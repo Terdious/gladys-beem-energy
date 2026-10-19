@@ -10,6 +10,29 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- Box widget: the **cuts of the day** — the moments of 5 minutes or more the
+  box produced nothing while the other boxes produced, with the time of the
+  last one — to diagnose a box that connects and disconnects
+  ([#1](https://github.com/Terdious/gladys-beem-energy/issues/1)).
+- Box widget: an **expected** curve next to the power curve of the day (the
+  power the box would have at the median load of the other boxes), and a row
+  with the yield of the box against the median of the boxes, always shown
+  ([#1](https://github.com/Terdious/gladys-beem-energy/issues/1)).
+
+### Changed
+
+- Box widget: the power curve uses the 5-minute averages of the integration
+  instead of the raw history (no more sawtooth from the 30 W steps of the
+  cloud); the panel orientation reads as a compass point (`SE -30° · ∠30°`);
+  the lifetime row tells its first month; yesterday is hidden until it is
+  known ([#1](https://github.com/Terdious/gladys-beem-energy/issues/1)).
+- Site, savings and history widgets: no heading repeating the card title, only
+  the title set in the widget settings; the peak power gauges are no longer
+  orange whatever their value
+  ([#1](https://github.com/Terdious/gladys-beem-energy/issues/1)).
+
 ## [1.0.0] - 2026-10-19
 
 ### Added
