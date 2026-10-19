@@ -1,0 +1,218 @@
+# Beem Energy pour Gladys Assistant
+
+Suivez vos **kits solaires Beem** (BeemBox des kits 300 W, Beem On des kits
+500 W) dans Gladys Assistant : puissance produite en direct, production du jour,
+du mois, de l'année et depuis le début, signal Wi-Fi de chaque box, estimation
+des économies et de l'amortissement, alertes quand une box produit moins que
+les autres.
+
+L'intégration lit le **cloud Beem**, avec le compte de l'application Beem : les
+box Beem n'offrent aucun accès local.
+
+## Prérequis
+
+- Un **compte Beem**, avec vos box déjà installées et visibles dans
+  l'application Beem.
+- Gladys Assistant **5.1 ou plus récent**.
+
+## Fonctionnalités
+
+Chaque box du compte devient un appareil Gladys, avec :
+
+| Fonctionnalité             | Catégorie / type                                | Unité |
+| -------------------------- | ----------------------------------------------- | ----- |
+| Puissance solaire          | `energy-production-sensor` / `power`            | W     |
+| Production solaire (index) | `energy-production-sensor` / `index`            | kWh   |
+| Production aujourd'hui     | `energy-production-sensor` / `daily-production` | kWh   |
+| Signal Wi-Fi               | `signal` / `integer`                            | %     |
+
+- **Toutes les box en une requête** : le cloud Beem répond pour toutes les box
+  du compte d'un coup, lues toutes les deux minutes par défaut (une minute au
+  minimum : le cloud rafraîchit une box environ chaque minute).
+- **Une box en veille la nuit** (alimentée par ses panneaux, elle s'éteint au
+  crépuscule) affiche 0 W au lieu de sa dernière puissance, dès que son dernier
+  relevé a plus de 15 minutes.
+- **L'index de production** est la fonctionnalité que le **suivi de
+  l'énergie** de Gladys transforme en production par demi-heure. Le cloud Beem
+  ne donne que la production du jour et du mois : l'intégration calcule son
+  propre index à partir du total du mois, et récupère le total final du mois
+  précédent au changement de mois. Rien n'est perdu à minuit, ni pendant un
+  arrêt du conteneur : le relevé suivant rattrape la production manquée.
+- **Historique mensuel** : au démarrage, l'intégration demande au cloud Beem la
+  production des mois passés (24 par défaut, une requête toutes les quelques
+  secondes, une seule fois par mois : un mois passé ne change plus). Les
+  chiffres de l'année, le total, les économies et l'amortissement en partent.
+- Le badge de transport indique **cloud** pour une box présente dans le relevé
+  du cloud, **injoignable** pour une box qui en est absente.
+
+### Relier la production au suivi de l'énergie
+
+Dans **Intégrations → Suivi de l'énergie**, ajoutez la fonctionnalité
+**Production solaire (index)** de chaque box : Gladys en déduit la production
+par demi-heure et l'affiche dans ses tableaux de l'énergie, à côté de votre
+consommation.
+
+## Configuration
+
+| Champ                          | Rôle                                                                       |
+| ------------------------------ | -------------------------------------------------------------------------- |
+| E-mail, Mot de passe           | Le compte de l'application Beem (le mot de passe n'est jamais journalisé). |
+| Intervalle de rafraîchissement | Secondes entre deux lectures du cloud (60 à 3600, 120 par défaut).         |
+| Mois d'historique              | Mois récupérés au démarrage (0 à 120, 24 par défaut, 0 désactive).         |
+| Langue des noms                | Langue des noms de fonctionnalités des nouvelles box (anglais, français).  |
+| Fuseau horaire                 | Les jours et mois du cloud Beem, les heures creuses et le bilan du jour.   |
+| Tarif, prix…                   | L'estimation des économies (voir plus bas).                                |
+| Seuil de sous-production       | Les alertes (voir plus bas).                                               |
+
+Le bouton **Tester la connexion** se connecte au cloud et liste les box
+trouvées.
+
+## Widgets du tableau de bord
+
+Quatre widgets, à ajouter depuis **Tableau de bord → Modifier → Ajouter un
+widget** :
+
+- **Box Beem** : une box. Courbe de puissance du jour (l'historique de Gladys),
+  jauge de la puissance par rapport à la puissance crête, puissance en direct,
+  production du jour et du mois, **rendement** du jour (kWh par kWc installé,
+  comparable entre un kit 300 W et un kit 500 W), heure du dernier relevé (« en
+  veille » la nuit), signal Wi-Fi (dBm et %), panneaux (nombre, puissance,
+  orientation), hier, l'année, le total, et l'alerte de sous-production.
+- **Installation solaire** : toute l'installation, en **monophasé** (les box
+  choisies, ou toutes) ou en **triphasé** : attribuez les box de chaque phase
+  (L1, L2, L3) dans les réglages du widget. Courbe de puissance du jour (une
+  courbe par phase en triphasé), puissance, jour, mois, année, part de la
+  puissance crête, une ligne par phase (puissance · production du jour), l'**équilibre
+  des phases** (en alerte au-delà du seuil réglé, 500 W par défaut), les box
+  muettes ou à faible rendement, et les erreurs d'attribution (une box dans
+  deux phases, ou dans aucune).
+- **Économies solaires** : économies du jour, du mois, de l'année et au total,
+  jauge et date d'**amortissement**, valeur d'un kWh solaire, parts
+  autoconsommée et injectée, CO2 évité, et les économies des 12 derniers mois.
+- **Historique de production** : barres des 30 derniers jours, ou des 12 ou 24
+  derniers mois ; total et moyenne de la période, meilleur jour ou mois, le mois
+  en cours comparé au même mois de l'an dernier, classement des box du mois
+  (avec leur rendement par kWc).
+
+> Les jours de l'historique s'accumulent à partir de l'installation de
+> l'intégration : le cloud Beem ne donne pas l'historique jour par jour, seulement
+> mois par mois.
+
+### Exemple : 3 phases, 6 box
+
+Pour 3 BeemBox (3 kits 300 W chacune) et 3 Beem On (2 kits 500 W chacune), une
+BeemBox et une Beem On par phase : ajoutez le widget **Installation solaire**,
+choisissez **Triphasée**, puis mettez dans **Box de la phase L1** la BeemBox et
+la Beem On de L1, et ainsi de suite. Chaque phase affiche 1,9 kWc ; l'installation
+5,7 kWc.
+
+## Économies (estimation)
+
+Un kit plug-and-play n'a pas de compteur réseau : rien ne dit quelle part de la
+production le logement a consommée et quelle part est partie sur le réseau.
+L'estimation repose donc sur vos chiffres :
+
+> valeur d'un kWh produit = taux d'autoconsommation × prix solaire
+>
+> - (1 − taux) × prix de revente (0 sans contrat de revente : le surplus d'un
+>   kit sans contrat est injecté gratuitement)
+
+- **Tarif** : _Base_ (un prix) ou _Heures pleines / creuses_ (deux prix et les
+  plages des heures creuses, ex. `22:00-06:00` ou `02:00-07:00,13:00-16:00`).
+  En heures pleines / creuses, le **prix solaire** est pondéré par le moment où
+  les panneaux produisent : la courbe mesurée des deux derniers jours, ou une
+  courbe de jour standard au début. Des heures creuses la nuit donnent un prix
+  solaire proche du prix des heures pleines ; des heures creuses en début
+  d'après-midi le font baisser.
+- **Taux d'autoconsommation** : 100 % par défaut, réaliste pour un kit
+  dimensionné sur la consommation de fond du logement. Baissez-le si votre
+  compteur indique souvent de l'injection.
+- **Revente** : si vous avez un contrat de revente du surplus, cochez la case et
+  donnez le prix.
+- **Coût de l'installation** : ce que vous avez payé les kits (et leur pose).
+  Le widget affiche alors la part amortie et la date d'amortissement, au rythme
+  des 12 derniers mois complets.
+- **CO2 évité** : l'intensité carbone de l'électricité du réseau que votre
+  production remplace (50 g par kWh par défaut, ordre de grandeur du mix
+  français ; 0 masque le chiffre).
+
+Les économies sont recalculées à partir de l'énergie et du tarif actuel : un
+changement de prix s'applique aussi au passé. C'est une estimation, pas une
+facture.
+
+## Alertes et scènes
+
+### Box en sous-production
+
+Les box sont comparées entre elles, à taille égale (production par kWc installé) :
+
+- **Muette** : une box qui ne produit rien pendant 30 minutes alors que les
+  autres produisent (micro-onduleur éteint, Wi-Fi perdu, disjoncteur…).
+- **Rendement faible** : à partir de 14 h, une box dont le rendement du jour est
+  sous le **seuil de sous-production** (60 % par défaut) du rendement médian des
+  box, un jour assez ensoleillé pour comparer (0,5 kWh/kWc au moins). Si vos box
+  ont des orientations très différentes, baissez le seuil ; 0 désactive la
+  détection.
+
+L'alerte apparaît sur les widgets et déclenche le déclencheur de scène **Box en
+sous-production** (filtres : la box, la raison), une fois par box et par jour.
+Variables : `device_name`, `reason` (`silent` ou `low_yield`), `ratio` (% du
+rendement des autres), `today_kwh`.
+
+### Bilan de production du jour
+
+Le déclencheur **Bilan de production du jour** se déclenche une fois par jour,
+quand la journée solaire est finie (toutes les box à 0 W depuis 30 minutes après
+16 h, ou à 22 h au plus tard). Variables : `today_kwh`, `month_kwh`,
+`yield_kwh_per_kwp`, `savings`, `co2_kg`, `best_box`, `best_box_kwh`. Par exemple,
+un message : « ☀️ Production du jour : {{triggerEvent.data.today_kwh}} kWh,
+{{triggerEvent.data.savings}} € économisés ».
+
+### Lire la production solaire
+
+L'action de scène **Lire la production solaire** renvoie les chiffres actuels
+d'une box, ou de toute l'installation si aucune box n'est choisie :
+`power_w`, `today_kwh`, `month_kwh`, `year_kwh`, `load_percent` (part de la
+puissance crête), `savings_today`, `savings_month`. Par exemple, une condition
+« si `power_w` > 1500 » pour lancer le lave-vaisselle quand le soleil brille.
+
+## Mettre à jour l'intégration
+
+**Installée depuis le catalogue** (le cas habituel) : quand une nouvelle version
+sort, l'intégration affiche un badge **« Mise à jour disponible »** et son onglet
+**Supervision** propose la version, avec un lien vers ses notes. Cliquez sur
+**Mettre à jour** : Gladys récupère la nouvelle image et le nouveau manifest.
+Votre configuration, vos appareils et l'historique (dans `/data`) sont
+conservés.
+
+**Installée en mode développeur** (manifest collé à la main) : **« Forcer la mise
+à jour »** ne fait que récupérer à nouveau l'image ; recollez le manifest à jour
+pour récupérer les nouveaux champs.
+
+## Dépannage
+
+- **« Le cloud Beem a refusé l'e-mail ou le mot de passe »** : utilisez les
+  identifiants de l'application Beem (pas ceux du site de commande).
+- **« Limite de l'API Beem atteinte »** : le cloud Beem bloque un compte qui se
+  connecte trop souvent. L'intégration garde son jeton une heure et, après un
+  refus, attend 20 minutes avant de réessayer. Évitez de connecter le même
+  compte à plusieurs outils en même temps (Home Assistant, scripts…), ou
+  augmentez l'intervalle de rafraîchissement.
+- **Une box est injoignable** : elle est absente du relevé du cloud. Vérifiez
+  qu'elle apparaît dans l'application Beem.
+- **Pas d'historique** : lancez l'action **Recharger l'historique** (par exemple
+  après avoir ajouté une box au compte).
+
+### Diagnostic
+
+L'action **Diagnostiquer les box** affiche, pour chaque box, ce que le cloud
+remonte maintenant (puissance, jour, mois, signal, dernier relevé) et ce que
+l'intégration conserve (index, mois d'historique). Joignez-la à un ticket : elle
+ne contient ni e-mail, ni mot de passe, ni jeton.
+
+## Remerciements
+
+Le cloud Beem n'a pas d'API publique : les adresses et les champs utilisés ont
+été documentés par la communauté, notamment l'intégration Home Assistant
+[CharlesP44/Beem_Energy](https://github.com/CharlesP44/Beem_Energy) (licence MIT).
+Le code de cette intégration est original.

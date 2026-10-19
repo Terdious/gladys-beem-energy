@@ -1,0 +1,208 @@
+# Beem Energy for Gladys Assistant
+
+Track your **Beem solar kits** (BeemBox of the 300 W kits, Beem On of the 500 W
+kits) in Gladys Assistant: live solar power, production of the day, the month,
+the year and since the start, Wi-Fi signal of each box, savings and payback
+estimate, and alerts when a box produces less than the others.
+
+The integration reads the **Beem cloud**, with the account of the Beem
+application: Beem boxes offer no local access.
+
+## Requirements
+
+- A **Beem account**, with your boxes already installed and visible in the Beem
+  application.
+- Gladys Assistant **5.1 or later**.
+
+## Features
+
+Every box of the account becomes a Gladys device, with:
+
+| Feature                  | Category / type                                 | Unit |
+| ------------------------ | ----------------------------------------------- | ---- |
+| Solar power              | `energy-production-sensor` / `power`            | W    |
+| Solar production (index) | `energy-production-sensor` / `index`            | kWh  |
+| Production today         | `energy-production-sensor` / `daily-production` | kWh  |
+| Wi-Fi signal             | `signal` / `integer`                            | %    |
+
+- **Every box in one request**: the Beem cloud answers for all the boxes of the
+  account at once, read every two minutes by default (one minute at least: the
+  cloud refreshes a box about once a minute).
+- **A box asleep at night** (powered by its panels, it switches off at dusk)
+  shows 0 W instead of its last power, as soon as its last report is older than
+  15 minutes.
+- **The production index** is the feature Gladys' **energy monitoring** turns
+  into thirty-minute production. The Beem cloud only gives the production of the
+  day and of the month: the integration computes its own index from the month
+  total, and asks for the final total of the previous month on a month change.
+  Nothing is lost at midnight, nor during a container downtime: the next reading
+  catches up the missed production.
+- **Monthly history**: at startup, the integration asks the Beem cloud for the
+  production of the past months (24 by default, one request every few seconds,
+  once per month: a past month never changes). The year, lifetime, savings and
+  payback figures start there.
+- The transport badge reads **cloud** for a box present in the cloud summary,
+  **unreachable** for a box missing from it.
+
+### Linking the production to the energy monitoring
+
+In **Integrations → Energy monitoring**, add the **Solar production (index)**
+feature of each box: Gladys derives the thirty-minute production and shows it in
+its energy dashboards, next to your consumption.
+
+## Configuration
+
+| Field                      | Role                                                                 |
+| -------------------------- | -------------------------------------------------------------------- |
+| E-mail, Password           | The account of the Beem application (the password is never logged).  |
+| Refresh interval           | Seconds between two reads of the cloud (60 to 3600, 120 by default). |
+| Months of history          | Months fetched at startup (0 to 120, 24 by default, 0 disables).     |
+| Feature names language     | Language of the feature names of new boxes (English, French).        |
+| Timezone                   | Days and months of the Beem cloud, off-peak hours, daily report.     |
+| Tariff, prices…            | The savings estimate (see below).                                    |
+| Underperformance threshold | The alerts (see below).                                              |
+
+The **Test the connection** button signs in to the cloud and lists the boxes
+found.
+
+## Dashboard widgets
+
+Four widgets, added from **Dashboard → Edit → Add a widget**:
+
+- **Beem box**: one box. Power curve of the day (Gladys' history), gauge of the
+  power over the peak power, live power, production of the day and the month,
+  **yield** of the day (kWh per installed kWp, comparable between a 300 W and a
+  500 W kit), time of the last report ("asleep" at night), Wi-Fi signal (dBm and
+  %), panels (count, power, orientation), yesterday, the year, the lifetime, and
+  the underperformance alert.
+- **Solar installation**: the whole installation, **single-phase** (the boxes
+  chosen, or all of them) or **three-phase**: assign the boxes of each phase
+  (L1, L2, L3) in the widget settings. Power curve of the day (one curve per
+  phase in three-phase), power, day, month, year, share of the peak power, one
+  row per phase (power · production of the day), the **phase balance** (in
+  warning past the threshold set, 500 W by default), the silent or low-yield
+  boxes, and the assignment mistakes (a box in two phases, or in none).
+- **Solar savings**: savings of the day, the month, the year and in total,
+  **payback** gauge and date, value of one solar kWh, self-consumed and exported
+  shares, CO2 avoided, and the savings of the last 12 months.
+- **Production history**: bars of the last 30 days, or of the last 12 or 24
+  months; total and average of the period, best day or month, the current month
+  against the same month last year, ranking of the boxes this month (with their
+  yield per kWp).
+
+> The days of the history accumulate from the installation of the integration
+> on: the Beem cloud gives the history month by month only.
+
+### Example: 3 phases, 6 boxes
+
+For 3 BeemBox (3 × 300 W kits each) and 3 Beem On (2 × 500 W kits each), one
+BeemBox and one Beem On per phase: add the **Solar installation** widget, choose
+**Three-phase**, then put in **Phase L1 boxes** the BeemBox and the Beem On of
+L1, and so on. Each phase shows 1.9 kWp; the installation 5.7 kWp.
+
+## Savings (estimate)
+
+A plug-and-play kit has no grid meter: nothing tells which part of the
+production the home consumed and which part went to the grid. The estimate
+therefore rests on your figures:
+
+> value of 1 kWh produced = self-consumption rate × solar price
+>
+> - (1 − rate) × resale price (0 without a resale contract: the surplus of a
+>   kit without contract is given to the grid)
+
+- **Tariff**: _Base_ (one price) or _Peak / off-peak_ (two prices and the
+  off-peak ranges, e.g. `22:00-06:00` or `02:00-07:00,13:00-16:00`). With peak /
+  off-peak, the **solar price** is weighted by when the panels produce: the
+  curve measured over the last two days, or a standard daylight curve at first.
+  Off-peak hours at night give a solar price close to the peak price; off-peak
+  hours in the early afternoon lower it.
+- **Self-consumption rate**: 100 % by default, realistic for a kit sized on the
+  base load of the home. Lower it if your meter often shows an injection.
+- **Resale**: if you have a contract selling the surplus, tick the box and give
+  the price.
+- **Cost of the installation**: what you paid for the kits (and their
+  installation). The widget then shows the share paid back and the payback date,
+  at the pace of the last 12 complete months.
+- **CO2 avoided**: the carbon intensity of the grid electricity your production
+  replaces (50 g per kWh by default, the order of magnitude of the French mix; 0
+  hides the figure).
+
+The savings are computed from the energy and the current tariff: a price change
+applies to the past too. It is an estimate, not an invoice.
+
+## Alerts and scenes
+
+### Box underperforming
+
+The boxes are compared with each other, size for size (production per installed
+kWp):
+
+- **Silent**: a box producing nothing for 30 minutes while the others produce
+  (micro-inverter off, Wi-Fi lost, breaker tripped…).
+- **Low yield**: from 14:00, a box whose yield of the day is below the
+  **underperformance threshold** (60 % by default) of the median yield of the
+  boxes, on a day bright enough to compare (0.5 kWh/kWp at least). If your boxes
+  have very different orientations, lower the threshold; 0 disables the
+  detection.
+
+The alert shows on the widgets and fires the **Box underperforming** scene
+trigger (filters: the box, the reason), once per box and per day. Variables:
+`device_name`, `reason` (`silent` or `low_yield`), `ratio` (% of the yield of
+the others), `today_kwh`.
+
+### Daily production report
+
+The **Daily production report** trigger fires once a day, when the solar day is
+over (every box at 0 W for 30 minutes after 16:00, or at 22:00 at the latest).
+Variables: `today_kwh`, `month_kwh`, `yield_kwh_per_kwp`, `savings`, `co2_kg`,
+`best_box`, `best_box_kwh`. For instance, a message: "☀️ Production today:
+{{triggerEvent.data.today_kwh}} kWh, {{triggerEvent.data.savings}} € saved".
+
+### Get the solar production
+
+The **Get the solar production** scene action returns the current figures of a
+box, or of the whole installation when no box is chosen: `power_w`,
+`today_kwh`, `month_kwh`, `year_kwh`, `load_percent` (share of the peak power),
+`savings_today`, `savings_month`. For instance, a condition "if `power_w` >
+1500" to start the dishwasher when the sun shines.
+
+## Updating the integration
+
+**Installed from the catalog** (the usual case): when a new version is out, the
+integration shows an **"Update available"** badge and its **Supervision** tab
+offers the version, with a link to its notes. Click **Update**: Gladys pulls the
+new image and the new manifest. Your configuration, your devices and the history
+(in `/data`) are kept.
+
+**Installed in developer mode** (manifest pasted by hand): **"Force update"**
+only pulls the image again; paste the up-to-date manifest again to get the new
+fields.
+
+## Troubleshooting
+
+- **"The Beem cloud refused the e-mail or the password"**: use the credentials
+  of the Beem application (not those of the online shop).
+- **"Beem API rate limit reached"**: the Beem cloud blocks an account that signs
+  in too often. The integration keeps its token for an hour and, after a refusal,
+  waits 20 minutes before trying again. Avoid connecting the same account to
+  several tools at once (Home Assistant, scripts…), or raise the refresh
+  interval.
+- **A box is unreachable**: it is missing from the cloud summary. Check that it
+  shows in the Beem application.
+- **No history**: run the **Reload the history** action (for instance after
+  adding a box to the account).
+
+### Diagnostic
+
+The **Diagnose the boxes** action shows, for each box, what the cloud reports
+right now (power, day, month, signal, last report) and what the integration
+keeps (index, months of history). Attach it to an issue: it holds no e-mail, no
+password and no token.
+
+## Credits
+
+The Beem cloud has no public API: the addresses and fields used were documented
+by the community, notably the Home Assistant integration
+[CharlesP44/Beem_Energy](https://github.com/CharlesP44/Beem_Energy) (MIT
+License). The code of this integration is original.

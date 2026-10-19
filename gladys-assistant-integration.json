@@ -1,0 +1,882 @@
+{
+  "manifest_version": 1,
+  "type": "device",
+  "name": "Beem Energy",
+  "description": {
+    "en": "Track your Beem solar kits (BeemBox, Beem On): production, history and savings.",
+    "fr": "Suivez vos kits solaires Beem (BeemBox, Beem On) : production, historique, économies."
+  },
+  "version": "0.1.0",
+  "docker_image": "ghcr.io/terdious/gladys-beem-energy:0.1.0",
+  "gladys_version": ">=5.1.0",
+  "cover_image": "https://raw.githubusercontent.com/Terdious/gladys-beem-energy/master/cover.png",
+  "categories": ["energy"],
+  "transports": ["cloud"],
+  "config_schema": [
+    {
+      "key": "intro",
+      "type": "section",
+      "label": {
+        "en": "Beem account",
+        "fr": "Compte Beem"
+      },
+      "description": {
+        "en": "Sign in with the e-mail and password of the Beem application. The integration reads every solar box of the account through the Beem cloud (no local access exists).",
+        "fr": "Connectez-vous avec l'e-mail et le mot de passe de l'application Beem. L'intégration lit toutes les box solaires du compte via le cloud Beem (il n'existe pas d'accès local)."
+      },
+      "links": [
+        {
+          "url": "https://beem.energy",
+          "label": {
+            "en": "Beem Energy",
+            "fr": "Beem Energy"
+          }
+        }
+      ]
+    },
+    {
+      "key": "email",
+      "type": "string",
+      "label": {
+        "en": "E-mail",
+        "fr": "E-mail"
+      },
+      "required": true,
+      "placeholder": {
+        "en": "you@example.com",
+        "fr": "vous@exemple.fr"
+      }
+    },
+    {
+      "key": "password",
+      "type": "secret",
+      "label": {
+        "en": "Password",
+        "fr": "Mot de passe"
+      },
+      "required": true
+    },
+    {
+      "key": "poll_frequency",
+      "type": "number",
+      "label": {
+        "en": "Refresh interval (s)",
+        "fr": "Intervalle de rafraîchissement (s)"
+      },
+      "description": {
+        "en": "How often the Beem cloud is read, in seconds (one minute minimum: the cloud refreshes a box about once a minute and limits the accounts that insist).",
+        "fr": "Fréquence de lecture du cloud Beem, en secondes (une minute minimum : le cloud rafraîchit une box environ chaque minute et limite les comptes trop insistants)."
+      },
+      "default": 120,
+      "min": 60,
+      "max": 3600
+    },
+    {
+      "key": "history_months",
+      "type": "number",
+      "label": {
+        "en": "Months of history",
+        "fr": "Mois d'historique"
+      },
+      "description": {
+        "en": "Monthly production fetched from the Beem cloud at startup (year, lifetime, savings and payback). 0 disables it.",
+        "fr": "Production mensuelle récupérée du cloud Beem au démarrage (année, total, économies et amortissement). 0 la désactive."
+      },
+      "default": 24,
+      "min": 0,
+      "max": 120
+    },
+    {
+      "key": "feature_names",
+      "type": "select",
+      "label": {
+        "en": "Language of the feature names",
+        "fr": "Langue des noms de fonctionnalités"
+      },
+      "description": {
+        "en": "Applied to the boxes discovered from now on.",
+        "fr": "Appliquée aux box découvertes à partir de maintenant."
+      },
+      "default": "en",
+      "options": [
+        {
+          "value": "en",
+          "label": {
+            "en": "English",
+            "fr": "Anglais"
+          }
+        },
+        {
+          "value": "fr",
+          "label": {
+            "en": "French",
+            "fr": "Français"
+          }
+        }
+      ]
+    },
+    {
+      "key": "timezone",
+      "type": "string",
+      "label": {
+        "en": "Timezone",
+        "fr": "Fuseau horaire"
+      },
+      "description": {
+        "en": "IANA name: the days and months of the Beem cloud, the off-peak hours and the daily report follow it.",
+        "fr": "Nom IANA : les jours et mois du cloud Beem, les heures creuses et le bilan du jour le suivent."
+      },
+      "default": "Europe/Paris",
+      "placeholder": {
+        "en": "Europe/Paris",
+        "fr": "Europe/Paris"
+      }
+    },
+    {
+      "key": "savings_intro",
+      "type": "section",
+      "label": {
+        "en": "Savings estimate",
+        "fr": "Estimation des économies"
+      },
+      "description": {
+        "en": "Without a grid meter, the savings are an estimate: the production times the price of the electricity it saves you from buying, plus the resale of the surplus if you have a contract. Leave the mode on None to hide them.",
+        "fr": "Sans compteur réseau, les économies sont une estimation : la production multipliée par le prix de l'électricité qu'elle vous évite d'acheter, plus la revente du surplus si vous avez un contrat. Laissez le mode sur Aucun pour les masquer."
+      }
+    },
+    {
+      "key": "tariff_mode",
+      "type": "select",
+      "label": {
+        "en": "Electricity tariff",
+        "fr": "Tarif d'électricité"
+      },
+      "default": "none",
+      "options": [
+        {
+          "value": "none",
+          "label": {
+            "en": "None (no estimate)",
+            "fr": "Aucun (pas d'estimation)"
+          }
+        },
+        {
+          "value": "base",
+          "label": {
+            "en": "Base (one price)",
+            "fr": "Base (prix unique)"
+          }
+        },
+        {
+          "value": "peak_offpeak",
+          "label": {
+            "en": "Peak / off-peak",
+            "fr": "Heures pleines / creuses"
+          }
+        }
+      ]
+    },
+    {
+      "key": "price_base",
+      "type": "number",
+      "label": {
+        "en": "Base price (per kWh)",
+        "fr": "Prix base (par kWh)"
+      },
+      "placeholder": {
+        "en": "e.g. 0.2016",
+        "fr": "ex. 0,2016"
+      },
+      "min": 0,
+      "max": 10
+    },
+    {
+      "key": "price_peak",
+      "type": "number",
+      "label": {
+        "en": "Peak price (per kWh)",
+        "fr": "Prix heures pleines (par kWh)"
+      },
+      "placeholder": {
+        "en": "e.g. 0.2146",
+        "fr": "ex. 0,2146"
+      },
+      "min": 0,
+      "max": 10
+    },
+    {
+      "key": "price_offpeak",
+      "type": "number",
+      "label": {
+        "en": "Off-peak price (per kWh)",
+        "fr": "Prix heures creuses (par kWh)"
+      },
+      "placeholder": {
+        "en": "e.g. 0.1696",
+        "fr": "ex. 0,1696"
+      },
+      "min": 0,
+      "max": 10
+    },
+    {
+      "key": "offpeak_hours",
+      "type": "string",
+      "label": {
+        "en": "Off-peak hours",
+        "fr": "Heures creuses"
+      },
+      "description": {
+        "en": "HH:MM-HH:MM ranges separated by commas, in the timezone above.",
+        "fr": "Plages HH:MM-HH:MM séparées par des virgules, dans le fuseau ci-dessus."
+      },
+      "placeholder": {
+        "en": "22:00-06:00 or 02:00-07:00,13:00-16:00",
+        "fr": "22:00-06:00 ou 02:00-07:00,13:00-16:00"
+      }
+    },
+    {
+      "key": "self_consumption_rate",
+      "type": "number",
+      "label": {
+        "en": "Self-consumption rate (%)",
+        "fr": "Taux d'autoconsommation (%)"
+      },
+      "description": {
+        "en": "Share of the production your home consumes at once. A kit sized for the base load is close to 100 %; lower it if the meter often shows an injection.",
+        "fr": "Part de la production consommée sur le moment par le logement. Un kit dimensionné sur le talon est proche de 100 % ; baissez-le si le compteur indique souvent de l'injection."
+      },
+      "default": 100,
+      "min": 0,
+      "max": 100
+    },
+    {
+      "key": "resale_enabled",
+      "type": "boolean",
+      "label": {
+        "en": "I sell my surplus",
+        "fr": "Je revends mon surplus"
+      },
+      "description": {
+        "en": "Off: the surplus is given to the grid (the usual case of a plug-and-play kit).",
+        "fr": "Désactivé : le surplus est injecté gratuitement (cas habituel d'un kit plug-and-play)."
+      },
+      "default": false
+    },
+    {
+      "key": "resale_price",
+      "type": "number",
+      "label": {
+        "en": "Resale price (per kWh)",
+        "fr": "Prix de revente (par kWh)"
+      },
+      "placeholder": {
+        "en": "e.g. 0.04",
+        "fr": "ex. 0,04"
+      },
+      "min": 0,
+      "max": 10
+    },
+    {
+      "key": "installation_cost",
+      "type": "number",
+      "label": {
+        "en": "Cost of the installation",
+        "fr": "Coût de l'installation"
+      },
+      "description": {
+        "en": "What you paid for the kits (and their installation): the savings widget shows the payback.",
+        "fr": "Ce que vous avez payé les kits (et leur pose) : le widget des économies en affiche l'amortissement."
+      },
+      "placeholder": {
+        "en": "e.g. 4500",
+        "fr": "ex. 4500"
+      },
+      "min": 0,
+      "max": 1000000
+    },
+    {
+      "key": "co2_factor",
+      "type": "number",
+      "label": {
+        "en": "CO2 avoided (g per kWh)",
+        "fr": "CO2 évité (g par kWh)"
+      },
+      "description": {
+        "en": "Carbon intensity of the grid electricity your production replaces. 0 hides the figure.",
+        "fr": "Intensité carbone de l'électricité du réseau que votre production remplace. 0 masque le chiffre."
+      },
+      "default": 50,
+      "min": 0,
+      "max": 2000
+    },
+    {
+      "key": "alerts_intro",
+      "type": "section",
+      "label": {
+        "en": "Alerts",
+        "fr": "Alertes"
+      },
+      "description": {
+        "en": "The boxes of the installation are compared with each other (production per kWp installed): a box silent while the others produce, or far below them, is flagged on the dashboard and fires the \"Box underperforming\" scene trigger.",
+        "fr": "Les box de l'installation sont comparées entre elles (production par kWc installé) : une box muette pendant que les autres produisent, ou très en dessous d'elles, est signalée sur le tableau de bord et déclenche le déclencheur de scène « Box en sous-production »."
+      }
+    },
+    {
+      "key": "underperformance_threshold",
+      "type": "number",
+      "label": {
+        "en": "Underperformance threshold (%)",
+        "fr": "Seuil de sous-production (%)"
+      },
+      "description": {
+        "en": "A box is flagged below this share of the median yield of the boxes. 0 disables the detection.",
+        "fr": "Une box est signalée sous cette part du rendement médian des box. 0 désactive la détection."
+      },
+      "default": 60,
+      "min": 0,
+      "max": 100
+    }
+  ],
+  "actions": [
+    {
+      "key": "test_connection",
+      "label": {
+        "en": "Test the connection",
+        "fr": "Tester la connexion"
+      },
+      "timeout_seconds": 60
+    },
+    {
+      "key": "diagnostic",
+      "label": {
+        "en": "Diagnose the boxes",
+        "fr": "Diagnostiquer les box"
+      },
+      "description": {
+        "en": "What the Beem cloud reports for each box right now.",
+        "fr": "Ce que le cloud Beem remonte pour chaque box en ce moment."
+      },
+      "timeout_seconds": 60
+    },
+    {
+      "key": "reload_history",
+      "label": {
+        "en": "Reload the history",
+        "fr": "Recharger l'historique"
+      },
+      "description": {
+        "en": "Fetch the monthly production again (a box added later, a history cut short).",
+        "fr": "Récupère à nouveau la production mensuelle (une box ajoutée plus tard, un historique incomplet)."
+      },
+      "timeout_seconds": 15
+    }
+  ],
+  "scene_triggers": [
+    {
+      "key": "box_underperforming",
+      "label": {
+        "en": "Box underperforming",
+        "fr": "Box en sous-production"
+      },
+      "description": {
+        "en": "A Beem box is silent while the others produce, or yields far less than them (once per box and per day).",
+        "fr": "Une box Beem est muette pendant que les autres produisent, ou rend bien moins qu'elles (une fois par box et par jour)."
+      },
+      "fields": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Box",
+            "fr": "Box"
+          }
+        },
+        {
+          "key": "reason",
+          "type": "select",
+          "label": {
+            "en": "Reason",
+            "fr": "Raison"
+          },
+          "options": [
+            {
+              "value": "silent",
+              "label": {
+                "en": "Silent",
+                "fr": "Muette"
+              }
+            },
+            {
+              "value": "low_yield",
+              "label": {
+                "en": "Low yield",
+                "fr": "Rendement faible"
+              }
+            }
+          ]
+        }
+      ],
+      "variables": [
+        {
+          "key": "device_name",
+          "type": "string",
+          "label": {
+            "en": "Box name",
+            "fr": "Nom de la box"
+          }
+        },
+        {
+          "key": "reason",
+          "type": "string",
+          "label": {
+            "en": "Reason",
+            "fr": "Raison"
+          },
+          "description": {
+            "en": "silent or low_yield.",
+            "fr": "silent ou low_yield."
+          }
+        },
+        {
+          "key": "ratio",
+          "type": "number",
+          "label": {
+            "en": "Yield (% of the others)",
+            "fr": "Rendement (% des autres)"
+          }
+        },
+        {
+          "key": "today_kwh",
+          "type": "number",
+          "label": {
+            "en": "Production today (kWh)",
+            "fr": "Production du jour (kWh)"
+          }
+        }
+      ]
+    },
+    {
+      "key": "daily_production_report",
+      "label": {
+        "en": "Daily production report",
+        "fr": "Bilan de production du jour"
+      },
+      "description": {
+        "en": "The solar day is over (all boxes asleep after 16:00, or 22:00 at the latest): the figures of the day, once a day.",
+        "fr": "La journée solaire est finie (toutes les box en veille après 16 h, ou 22 h au plus tard) : les chiffres du jour, une fois par jour."
+      },
+      "variables": [
+        {
+          "key": "today_kwh",
+          "type": "number",
+          "label": {
+            "en": "Production today (kWh)",
+            "fr": "Production du jour (kWh)"
+          }
+        },
+        {
+          "key": "month_kwh",
+          "type": "number",
+          "label": {
+            "en": "Production this month (kWh)",
+            "fr": "Production du mois (kWh)"
+          }
+        },
+        {
+          "key": "yield_kwh_per_kwp",
+          "type": "number",
+          "label": {
+            "en": "Yield (kWh per kWp)",
+            "fr": "Rendement (kWh par kWc)"
+          }
+        },
+        {
+          "key": "savings",
+          "type": "number",
+          "label": {
+            "en": "Savings today (estimate)",
+            "fr": "Économie du jour (estimation)"
+          }
+        },
+        {
+          "key": "co2_kg",
+          "type": "number",
+          "label": {
+            "en": "CO2 avoided (kg)",
+            "fr": "CO2 évité (kg)"
+          }
+        },
+        {
+          "key": "best_box",
+          "type": "string",
+          "label": {
+            "en": "Best box",
+            "fr": "Meilleure box"
+          }
+        },
+        {
+          "key": "best_box_kwh",
+          "type": "number",
+          "label": {
+            "en": "Best box production (kWh)",
+            "fr": "Production de la meilleure box (kWh)"
+          }
+        }
+      ]
+    }
+  ],
+  "scene_actions": [
+    {
+      "key": "get_production",
+      "label": {
+        "en": "Get the solar production",
+        "fr": "Lire la production solaire"
+      },
+      "description": {
+        "en": "Current figures of a box, or of the whole installation when no box is chosen.",
+        "fr": "Chiffres actuels d'une box, ou de toute l'installation si aucune box n'est choisie."
+      },
+      "timeout_seconds": 30,
+      "fields": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Box (empty: whole installation)",
+            "fr": "Box (vide : toute l'installation)"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "key": "power_w",
+          "type": "number",
+          "label": {
+            "en": "Power (W)",
+            "fr": "Puissance (W)"
+          }
+        },
+        {
+          "key": "today_kwh",
+          "type": "number",
+          "label": {
+            "en": "Production today (kWh)",
+            "fr": "Production du jour (kWh)"
+          }
+        },
+        {
+          "key": "month_kwh",
+          "type": "number",
+          "label": {
+            "en": "Production this month (kWh)",
+            "fr": "Production du mois (kWh)"
+          }
+        },
+        {
+          "key": "year_kwh",
+          "type": "number",
+          "label": {
+            "en": "Production this year (kWh)",
+            "fr": "Production de l'année (kWh)"
+          }
+        },
+        {
+          "key": "load_percent",
+          "type": "number",
+          "label": {
+            "en": "Share of the peak power (%)",
+            "fr": "Part de la puissance crête (%)"
+          }
+        },
+        {
+          "key": "savings_today",
+          "type": "number",
+          "label": {
+            "en": "Savings today (estimate)",
+            "fr": "Économie du jour (estimation)"
+          }
+        },
+        {
+          "key": "savings_month",
+          "type": "number",
+          "label": {
+            "en": "Savings this month (estimate)",
+            "fr": "Économie du mois (estimation)"
+          }
+        }
+      ]
+    }
+  ],
+  "widgets": [
+    {
+      "key": "box",
+      "label": {
+        "en": "Beem box",
+        "fr": "Box Beem"
+      },
+      "description": {
+        "en": "One solar box: live power, day, month, yield, signal and alerts.",
+        "fr": "Une box solaire : puissance en direct, jour, mois, rendement, signal et alertes."
+      },
+      "icon": "sun",
+      "settings": [
+        {
+          "key": "device",
+          "type": "select",
+          "source": "devices",
+          "label": {
+            "en": "Box",
+            "fr": "Box"
+          },
+          "required": true
+        },
+        {
+          "key": "title",
+          "type": "string",
+          "label": {
+            "en": "Title",
+            "fr": "Titre"
+          },
+          "placeholder": {
+            "en": "Beem box",
+            "fr": "Box Beem"
+          }
+        }
+      ]
+    },
+    {
+      "key": "site",
+      "label": {
+        "en": "Solar installation",
+        "fr": "Installation solaire"
+      },
+      "description": {
+        "en": "The whole installation, single-phase or per phase (L1, L2, L3): curve, totals, alerts.",
+        "fr": "Toute l'installation, monophasée ou par phase (L1, L2, L3) : courbe, totaux, alertes."
+      },
+      "icon": "grid",
+      "settings": [
+        {
+          "key": "title",
+          "type": "string",
+          "label": {
+            "en": "Title",
+            "fr": "Titre"
+          },
+          "placeholder": {
+            "en": "My installation",
+            "fr": "Mon installation"
+          }
+        },
+        {
+          "key": "layout",
+          "type": "select",
+          "label": {
+            "en": "Electrical layout",
+            "fr": "Installation électrique"
+          },
+          "required": true,
+          "default": "single_phase",
+          "display": "radio",
+          "options": [
+            {
+              "value": "single_phase",
+              "label": {
+                "en": "Single-phase",
+                "fr": "Monophasée"
+              }
+            },
+            {
+              "value": "three_phase",
+              "label": {
+                "en": "Three-phase (L1, L2, L3)",
+                "fr": "Triphasée (L1, L2, L3)"
+              }
+            }
+          ]
+        },
+        {
+          "key": "devices",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Boxes (single-phase)",
+            "fr": "Box (monophasé)"
+          },
+          "description": {
+            "en": "None selected: every box of the account.",
+            "fr": "Aucune sélectionnée : toutes les box du compte."
+          }
+        },
+        {
+          "key": "phase_l1",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Phase L1 boxes (three-phase)",
+            "fr": "Box de la phase L1 (triphasé)"
+          },
+          "description": {
+            "en": "Three-phase only: each box in the phase it feeds.",
+            "fr": "Triphasé uniquement : chaque box dans la phase qu'elle alimente."
+          }
+        },
+        {
+          "key": "phase_l2",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Phase L2 boxes (three-phase)",
+            "fr": "Box de la phase L2 (triphasé)"
+          }
+        },
+        {
+          "key": "phase_l3",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Phase L3 boxes (three-phase)",
+            "fr": "Box de la phase L3 (triphasé)"
+          }
+        },
+        {
+          "key": "imbalance_threshold",
+          "type": "number",
+          "label": {
+            "en": "Phase imbalance alert (W)",
+            "fr": "Alerte de déséquilibre (W)"
+          },
+          "description": {
+            "en": "Warn when the production of two phases differs by more than this.",
+            "fr": "Avertit quand la production de deux phases diffère de plus que cette valeur."
+          },
+          "default": 500,
+          "min": 0,
+          "max": 20000
+        },
+        {
+          "key": "show_chart",
+          "type": "boolean",
+          "label": {
+            "en": "Power curve of the day",
+            "fr": "Courbe de puissance du jour"
+          },
+          "default": true
+        }
+      ]
+    },
+    {
+      "key": "savings",
+      "label": {
+        "en": "Solar savings",
+        "fr": "Économies solaires"
+      },
+      "description": {
+        "en": "Savings today, month, year and in total, payback and CO2 avoided (estimate).",
+        "fr": "Économies du jour, du mois, de l'année et au total, amortissement et CO2 évité (estimation)."
+      },
+      "icon": "trending-up",
+      "settings": [
+        {
+          "key": "title",
+          "type": "string",
+          "label": {
+            "en": "Title",
+            "fr": "Titre"
+          },
+          "placeholder": {
+            "en": "Solar savings",
+            "fr": "Économies solaires"
+          }
+        },
+        {
+          "key": "devices",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Boxes",
+            "fr": "Box"
+          },
+          "description": {
+            "en": "None selected: every box of the account.",
+            "fr": "Aucune sélectionnée : toutes les box du compte."
+          }
+        }
+      ]
+    },
+    {
+      "key": "history",
+      "label": {
+        "en": "Production history",
+        "fr": "Historique de production"
+      },
+      "description": {
+        "en": "Bars per day or per month, records, comparison with last year, ranking of the boxes.",
+        "fr": "Barres par jour ou par mois, records, comparaison avec l'an dernier, classement des box."
+      },
+      "icon": "bar-chart-2",
+      "settings": [
+        {
+          "key": "title",
+          "type": "string",
+          "label": {
+            "en": "Title",
+            "fr": "Titre"
+          },
+          "placeholder": {
+            "en": "Solar production",
+            "fr": "Production solaire"
+          }
+        },
+        {
+          "key": "period",
+          "type": "select",
+          "label": {
+            "en": "Period",
+            "fr": "Période"
+          },
+          "required": true,
+          "default": "days",
+          "options": [
+            {
+              "value": "days",
+              "label": {
+                "en": "Last 30 days",
+                "fr": "30 derniers jours"
+              }
+            },
+            {
+              "value": "months_12",
+              "label": {
+                "en": "Last 12 months",
+                "fr": "12 derniers mois"
+              }
+            },
+            {
+              "value": "months_24",
+              "label": {
+                "en": "Last 24 months",
+                "fr": "24 derniers mois"
+              }
+            }
+          ]
+        },
+        {
+          "key": "devices",
+          "type": "multi_select",
+          "source": "devices",
+          "label": {
+            "en": "Boxes",
+            "fr": "Box"
+          },
+          "description": {
+            "en": "None selected: every box of the account.",
+            "fr": "Aucune sélectionnée : toutes les box du compte."
+          }
+        }
+      ]
+    }
+  ]
+}
