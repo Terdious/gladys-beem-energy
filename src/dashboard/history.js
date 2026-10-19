@@ -31,6 +31,7 @@ import {
   monthLabel,
   siteSelection,
   tile,
+  headingOf,
   titleOf,
 } from './common.js';
 
@@ -75,7 +76,7 @@ export function historyContent(boxes, { now, config, title, period }) {
     ? dailySeries(boxes, now, timeZone, 30)
     : monthlySeries(boxes, now, timeZone, period === PERIODS.MONTHS_24 ? 24 : 12);
   const known = series.filter((entry) => entry.kwh !== null);
-  const components = [{ type: 'text', variant: 'heading', text: title }];
+  const components = headingOf(title);
   if (known.length > 0) {
     components.push({
       type: 'chart',
@@ -195,7 +196,7 @@ export const historyWidget = {
     return historyContent(boxes.length > 0 ? boxes : all, {
       now: Date.now(),
       config,
-      title: titleOf(settings, T('Solar production', 'Production solaire')),
+      title: titleOf(settings, null),
       period,
     });
   },

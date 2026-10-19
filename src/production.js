@@ -226,3 +226,74 @@ export function underperformers(boxes, now, timeZone, threshold) {
   }
   return result;
 }
+
+/**
+ * Per 5-minute bucket since `from`: the box's own average power, and what
+ * it would have produced at the median load (W per W peak) of the other
+ * boxes producing in the same bucket. `w` is null in a bucket the box has
+ * no sample for (absent from the summary), `expected` in a bucket no other
+ * box has a sample for, or without a known peak power.
+ * @param {ReturnType<typeof import('./store.js').createStore>} store
+ * @param {object} box snapshot
+ * @param {Array<object>} all every snapshot
+ * @param {number} from timestamp (ms)
+ * @returns {Array<{ t: number, w: number|null, expected: number|null }>}
+ */
+export function comparedSeries(store, box, all, from) {
+  const peers = all.filter((other) => other.id !== box.id && other.peakPowerW > 0);
+  const loads = new Map();
+  for (const peer of peers) {
+    for (const { t, w } of store.samples(peer.id, from)) {
+      if (!loads.has(t)) {
+        loads.set(t, []);
+      }
+      loads.get(t).push(w / peer.peakPowerW);
+    }
+  }
+  const own = new Map(store.samples(box.id, from).map(({ t, w }) => [t, w]));
+  const instants = [...new Set([...own.keys(), ...loads.keys()])].sort((a, b) => a - b);
+  return instants.map((t) => {
+    const load = loads.has(t) ? median(loads.get(t)) : null;
+    return {
+      t,
+      // No sample: the box was absent from the cloud summary.
+      w: own.has(t) ? Math.round(own.get(t)) : null,
+      expected: load === null || !(box.peakPowerW > 0) ? null : Math.round(load * box.peakPowerW),
+    };
+  });
+}
+
+/**
+ * Cuts of a box since `from`: the runs of 5-minute buckets where it produced
+ * nothing while the other boxes produced (their median load at least
+ * MIN_PEER_LOAD_FOR_SILENCE), closed by a production of the box again. A
+ * run still open is left out: at dusk, a box facing east stops before the
+ * ones facing west (the silent alert covers a cut still going on).
+ * @returns {{ count: number, lastAt: number|null }}
+ */
+export function cutsOf(store, box, all, from) {
+  const series = comparedSeries(store, box, all, from);
+  let count = 0;
+  let lastAt = null;
+  let runStart = null;
+  let produced = false;
+  for (const { t, w, expected } of series) {
+    const peersProduce =
+      expected !== null &&
+      box.peakPowerW > 0 &&
+      expected / box.peakPowerW >= MIN_PEER_LOAD_FOR_SILENCE;
+    if (w > 0) {
+      if (runStart !== null && produced) {
+        count += 1;
+        lastAt = runStart;
+      }
+      runStart = null;
+      produced = true;
+    } else if (peersProduce && runStart === null) {
+      runStart = t;
+    } else if (!peersProduce) {
+      runStart = null;
+    }
+  }
+  return { count, lastAt };
+}

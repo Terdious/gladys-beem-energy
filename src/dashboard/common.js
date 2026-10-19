@@ -6,6 +6,8 @@
 
 import { WIDGET_COLORS } from '@gladysassistant/integration-sdk';
 
+import { dayKey } from '../time.js';
+
 export const T = (en, fr) => ({ en, fr });
 
 export const UNKNOWN = '—';
@@ -89,6 +91,13 @@ export function fitRows(rows) {
 /** The widget title setting, or a default. */
 export const titleOf = (settings, fallback) =>
   (typeof settings?.title === 'string' && settings.title.trim()) || fallback;
+
+/**
+ * The heading of a content: none without a title, the card already shows
+ * the widget label above the content (a default heading only repeated it).
+ */
+export const headingOf = (title) =>
+  title ? [{ type: 'text', variant: 'heading', text: title }] : [];
 
 // --- Site layout: single-phase or three-phase ---------------------------------
 
@@ -234,3 +243,17 @@ export const dayLabel = (key) => `${key.slice(8, 10)}/${key.slice(5, 7)}`;
  */
 export const dayInstant = (key) => `${key}T12:00:00.000Z`;
 export const monthInstant = (key) => `${key}-15T12:00:00.000Z`;
+
+/**
+ * The first 5-minute bucket of the local day (the samples of the day start
+ * there), DST-aware.
+ */
+export function startOfToday(now, timeZone) {
+  const today = dayKey(now, timeZone);
+  const step = 5 * 60 * 1000;
+  let from = Math.floor((now - 24 * 60 * 60 * 1000) / step) * step;
+  while (dayKey(from, timeZone) !== today) {
+    from += step;
+  }
+  return from;
+}

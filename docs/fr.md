@@ -69,15 +69,26 @@ trouvées.
 
 ## Widgets du tableau de bord
 
+Le titre de la carte est le nom du widget ; donnez un **titre** dans ses réglages
+pour en afficher un autre (une box affiche toujours son nom).
+
 Quatre widgets, à ajouter depuis **Tableau de bord → Modifier → Ajouter un
 widget** :
 
-- **Box Beem** : une box. Courbe de puissance du jour (l'historique de Gladys),
-  jauge de la puissance par rapport à la puissance crête, puissance en direct,
-  production du jour et du mois, **rendement** du jour (kWh par kWc installé,
-  comparable entre un kit 300 W et un kit 500 W), heure du dernier relevé (« en
-  veille » la nuit), signal Wi-Fi (dBm et %), panneaux (nombre, puissance,
-  orientation), hier, l'année, le total, et l'alerte de sous-production.
+- **Box Beem** : une box. **Courbe de puissance du jour** (moyennes sur
+  5 minutes) avec, en regard, la courbe **attendue** : ce que la box produirait
+  au même rendement que les autres box (production par kWc), pour repérer d'un
+  coup d'œil une box en dessous de ses voisines. Jauge de la puissance par
+  rapport à la puissance crête, puissance en direct, production du jour et du
+  mois, **rendement** du jour (kWh par kWc installé, comparable entre un kit
+  300 W et un kit 500 W). En dessous : heure du dernier relevé (« en veille » la
+  nuit), signal Wi-Fi (dBm et %), **coupures du jour** (les moments d'au moins
+  5 minutes où la box n'a rien produit alors que les autres produisaient, avec
+  l'heure de la dernière : utile pour une box qui se connecte et se déconnecte),
+  rendement **face aux autres box** (en % de la médiane, ou l'alerte de
+  sous-production), panneaux (nombre, puissance, orientation en clair : `SE
+-30°` = 30° vers l'est depuis le sud, et inclinaison `∠30°`), hier, l'année,
+  et le total depuis le premier mois connu.
 - **Installation solaire** : toute l'installation, en **monophasé** (les box
   choisies, ou toutes) ou en **triphasé** : attribuez les box de chaque phase
   (L1, L2, L3) dans les réglages du widget. Courbe de puissance du jour (une

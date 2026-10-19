@@ -67,14 +67,24 @@ found.
 
 ## Dashboard widgets
 
+The card title is the name of the widget; give a **title** in its settings to
+show another one (a box always shows its name).
+
 Four widgets, added from **Dashboard → Edit → Add a widget**:
 
-- **Beem box**: one box. Power curve of the day (Gladys' history), gauge of the
-  power over the peak power, live power, production of the day and the month,
-  **yield** of the day (kWh per installed kWp, comparable between a 300 W and a
-  500 W kit), time of the last report ("asleep" at night), Wi-Fi signal (dBm and
-  %), panels (count, power, orientation), yesterday, the year, the lifetime, and
-  the underperformance alert.
+- **Beem box**: one box. **Power curve of the day** (5-minute averages) next
+  to the **expected** curve: what the box would produce at the same yield as the
+  other boxes (production per kWp), to spot at a glance a box below its
+  neighbours. Gauge of the power over the peak power, live power, production of
+  the day and the month, **yield** of the day (kWh per installed kWp, comparable
+  between a 300 W and a 500 W kit). Below: time of the last report ("asleep" at
+  night), Wi-Fi signal (dBm and %), **cuts of the day** (the moments of 5 minutes
+  or more the box produced nothing while the others produced, with the time of
+  the last one: useful for a box that connects and disconnects), yield
+  **against the other boxes** (in % of the median, or the underperformance
+  alert), panels (count, power, orientation in words: `SE -30°` = 30° to the
+  east from the south, and tilt `∠30°`), yesterday, the year, and the total
+  since the first month known.
 - **Solar installation**: the whole installation, **single-phase** (the boxes
   chosen, or all of them) or **three-phase**: assign the boxes of each phase
   (L1, L2, L3) in the widget settings. Power curve of the day (one curve per
