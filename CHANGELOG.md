@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-19
+
 ### Added
 
 - First release: discovery of every solar box of a Beem account (BeemBox 300 W
@@ -31,3 +33,6 @@ the notes of the version's GitHub Release.
   the end of the solar day; a "Get the solar production" scene action.
 - Configuration actions: test the connection, diagnose the boxes, reload the
   history. Protection against the rate limit of the Beem API.
+
+[Unreleased]: https://github.com/Terdious/gladys-beem-energy/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Terdious/gladys-beem-energy/releases/tag/v1.0.0
