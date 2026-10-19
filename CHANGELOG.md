@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-19
+
 ### Added
 
 - Box widget: the **cuts of the day** — the moments of 5 minutes or more the
@@ -57,5 +59,6 @@ the notes of the version's GitHub Release.
 - Configuration actions: test the connection, diagnose the boxes, reload the
   history. Protection against the rate limit of the Beem API.
 
-[Unreleased]: https://github.com/Terdious/gladys-beem-energy/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Terdious/gladys-beem-energy/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Terdious/gladys-beem-energy/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Terdious/gladys-beem-energy/releases/tag/v1.0.0
