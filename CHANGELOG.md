@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-23
+
 ### Added
 
 - **Go to a date**: the Period form of the widgets has a date field (`05/09/2025`,
@@ -134,7 +136,8 @@ the notes of the version's GitHub Release.
 - Configuration actions: test the connection, diagnose the boxes, reload the
   history. Protection against the rate limit of the Beem API.
 
-[Unreleased]: https://github.com/Terdious/gladys-beem-energy/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/Terdious/gladys-beem-energy/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/Terdious/gladys-beem-energy/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/Terdious/gladys-beem-energy/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/Terdious/gladys-beem-energy/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Terdious/gladys-beem-energy/compare/v1.1.0...v1.2.0
