@@ -33,6 +33,8 @@ export const TOKEN_LIFETIME_MS = 55 * 60 * 1000;
 // After a 429, the Beem API keeps refusing for several minutes.
 export const LOCK_AFTER_429_MS = 20 * 60 * 1000;
 export const REQUEST_TIMEOUT_MS = 20 * 1000;
+// The hourly production of a week is a slow answer for the Beem cloud.
+export const INTRADAY_TIMEOUT_MS = 60 * 1000;
 
 /** Error of the Beem API, with a stable `code` the callers branch on. */
 export class BeemApiError extends Error {
@@ -78,7 +80,7 @@ export function createBeemClient({
     }
   }
 
-  async function send(method, path, { body, auth = true } = {}) {
+  async function send(method, path, { body, auth = true, timeout = REQUEST_TIMEOUT_MS } = {}) {
     assertNotLocked();
     const headers = { Accept: 'application/json' };
     if (body !== undefined) {
@@ -93,7 +95,7 @@ export function createBeemClient({
         method,
         headers,
         body: body === undefined ? undefined : JSON.stringify(body),
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeout),
       });
     } catch (err) {
       throw new BeemApiError('network', `Beem API unreachable (${err.name ?? 'error'})`);
@@ -159,15 +161,15 @@ export function createBeemClient({
   }
 
   /** Authenticated request, logging in again once on an expired token. */
-  async function request(method, path, body) {
+  async function request(method, path, body, { timeout } = {}) {
     await ensureToken();
     try {
-      return await send(method, path, { body });
+      return await send(method, path, { body, timeout });
     } catch (err) {
       if (err instanceof BeemApiError && err.code === 'auth') {
         token = null;
         await ensureToken();
-        return send(method, path, { body });
+        return send(method, path, { body, timeout });
       }
       throw err;
     }
@@ -204,7 +206,9 @@ export function createBeemClient({
      */
     async getProductionIntraday({ from, to, scale = 'PT60M' }) {
       const query = new URLSearchParams({ from, to, scale });
-      const data = await request('GET', `/production/energy/intraday?${query}`);
+      const data = await request('GET', `/production/energy/intraday?${query}`, undefined, {
+        timeout: INTRADAY_TIMEOUT_MS,
+      });
       return data && typeof data === 'object' ? data : {};
     },
 

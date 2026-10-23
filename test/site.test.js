@@ -276,3 +276,52 @@ test('an answer without any day is asked again at the next start, and its shape 
   assert.match(message.fr, /Entrée du relevé : \{boxId:number,/);
   assert.ok(!message.en.includes('40000'), 'no value, only the shape');
 });
+
+test('a backfill stopped by an error resumes on its own an hour later', async () => {
+  const { site, beem, clock } = await setupSite({
+    at: NOON,
+    boxes: threePhaseBoxes().slice(0, 1),
+    summaries: {
+      '2026-10': [summary({ boxId: 101, month: 40000, at: NOON })],
+      '2026-09': [summary({ boxId: 101, month: 90000, at: NOON })],
+    },
+    config: { history_months: 1 },
+  });
+  const ok = intraday([101], 100);
+  let calls = 0;
+  beem.state.intraday = (query) => {
+    calls += 1;
+    if (calls === 2) {
+      throw new Error('slow week');
+    }
+    return ok(query);
+  };
+  await site.refresh();
+  await site.backfillHistory();
+  assert.equal(calls, 2, 'stopped on the slow week');
+
+  clock.now += 30 * 60_000;
+  await site.refresh();
+  assert.equal(calls, 2, 'not retried before an hour');
+
+  clock.now += 31 * 60_000;
+  await site.refresh();
+  // The refresh started it: wait for the backfill in flight.
+  await site.backfillHistory();
+  assert.equal(calls, 5, 'resumed: the three weeks left');
+  assert.equal(Object.keys(site.store.history('101').days).length, 29);
+});
+
+test('the weeks before the first month of production are not asked', async () => {
+  const { site, beem } = await setupSite({
+    at: NOON,
+    boxes: threePhaseBoxes().slice(0, 1),
+    summaries: { '2026-10': [summary({ boxId: 101, month: 40000, at: NOON })] },
+    config: { history_months: 12 },
+  });
+  beem.state.intraday = intraday([101], 100);
+  await site.refresh();
+  await site.backfillHistory();
+  // October only: the weeks from the 12th, 5th and 28 Sep (it ends in October).
+  assert.equal(beem.callsTo('/production/energy/intraday').length, 3);
+});

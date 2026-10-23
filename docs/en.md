@@ -40,7 +40,9 @@ Every box of the account becomes a Gladys device, with:
 - **History**: at startup, the integration asks the Beem cloud for the
   production of the past months (24 by default, one request every few seconds,
   once per month: a past month never changes), then of the past days (hourly
-  history, one week per request). The year, lifetime, savings and payback
+  history, one week per request; when the cloud is slow to answer, the backfill
+  resumes on its own an hour later, without a restart nor a click). The year,
+  lifetime, savings and payback
   figures and the browsing of the widgets start there.
 - The transport badge reads **cloud** for a box present in the cloud summary,
   **unreachable** for a box missing from it.

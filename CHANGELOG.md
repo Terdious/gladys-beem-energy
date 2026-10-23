@@ -10,6 +10,14 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Daily history: the hourly production of a week gets 60 s to answer instead
+  of 20 s, a backfill stopped by an error resumes on its own an hour later
+  (no restart nor **Reload the history** needed), and the weeks before the
+  first month of production are not asked
+  ([#7](https://github.com/Terdious/gladys-beem-energy/issues/7)).
+
 ## [1.2.1] - 2026-10-23
 
 ### Fixed
