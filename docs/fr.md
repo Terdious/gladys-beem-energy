@@ -41,7 +41,9 @@ Chaque box du compte devient un appareil Gladys, avec :
 - **Historique** : au démarrage, l'intégration demande au cloud Beem la
   production des mois passés (24 par défaut, une requête toutes les quelques
   secondes, une seule fois par mois : un mois passé ne change plus), puis celle
-  des jours passés (historique horaire, une semaine par requête). Les chiffres
+  des jours passés (historique horaire, une semaine par requête ; si le cloud
+  tarde à répondre, la récupération reprend d'elle-même une heure plus tard,
+  sans redémarrage ni clic). Les chiffres
   de l'année, le total, les économies, l'amortissement et la navigation dans les
   widgets en partent.
 - Le badge de transport indique **cloud** pour une box présente dans le relevé

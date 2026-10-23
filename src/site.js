@@ -54,6 +54,9 @@ export const STATE_HEARTBEAT_MS = 30 * 60 * 1000;
 export const HISTORY_REQUEST_SPACING_MS = 3000;
 // Days of production per intraday request (the Beem application's own pace).
 export const DAYS_PER_REQUEST = 7;
+// A backfill stopped by an error (a slow answer, a rate limit) resumes after a
+// refresh once this delay has passed, until it completes.
+export const HISTORY_RETRY_MS = 60 * 60 * 1000;
 // The backfill stops after this many months without any box: the account
 // did not exist yet.
 const EMPTY_MONTHS_BEFORE_STOP = 2;
@@ -120,6 +123,8 @@ export function createSite({
   let lastSaveAt = now();
   let refreshInFlight = null;
   let backfillInFlight = null;
+  let backfillStopped = false;
+  let backfillAt = 0;
   const listeners = new Set();
   // What the daily backfill met: shown by the diagnostic action.
   const dayHistory = {
@@ -255,6 +260,10 @@ export function createSite({
           logger.error('Refresh listener failed', err);
         }
       }
+      if (backfillStopped && now() - backfillAt >= HISTORY_RETRY_MS) {
+        // Not awaited: the refresh must not wait for a long history.
+        startBackfill().catch((err) => logger.error('History backfill failed', err));
+      }
       return true;
     } catch (err) {
       lastError = err instanceof BeemApiError ? err.code : 'network';
@@ -286,7 +295,8 @@ export function createSite({
       try {
         summaries = await client.getBoxSummary(period);
       } catch (err) {
-        logger.warn(`History of ${key} not fetched (${err.message}): retried at the next start`);
+        logger.warn(`History of ${key} not fetched (${err.message}): retried later`);
+        backfillStopped = true;
         break;
       }
       fetched += 1;
@@ -318,10 +328,19 @@ export function createSite({
     const today = dayKey(now(), timeZone);
     const maxDays = Math.min(DAY_RETENTION, config.history_months * 31);
     const dayOf = (at) => dayKey(at, timeZone);
+    // The first month with production: the weeks before it have nothing.
+    const produced = boxes
+      .flatMap((box) => Object.entries(store.history(box.id).months))
+      .filter(([, wh]) => wh > 0)
+      .map(([key]) => key)
+      .sort();
     let fetched = 0;
     let empty = 0;
     for (let back = DAYS_PER_REQUEST; back <= maxDays; back += DAYS_PER_REQUEST) {
       const first = shiftDay(today, -back);
+      if (produced.length > 0 && shiftDay(first, DAYS_PER_REQUEST - 1).slice(0, 7) < produced[0]) {
+        break;
+      }
       if (store.areDaysFetched(first)) {
         empty = 0;
         continue;
@@ -338,7 +357,8 @@ export function createSite({
         });
       } catch (err) {
         dayHistory.error = err.message;
-        logger.warn(`Daily history from ${first} not fetched (${err.message})`);
+        logger.warn(`Daily history from ${first} not fetched (${err.message}): retried later`);
+        backfillStopped = true;
         break;
       }
       fetched += 1;
@@ -379,10 +399,21 @@ export function createSite({
     return fetched;
   }
 
+  function startBackfill() {
+    if (!backfillInFlight) {
+      backfillInFlight = doBackfill().finally(() => {
+        backfillInFlight = null;
+      });
+    }
+    return backfillInFlight;
+  }
+
   async function doBackfill() {
     if (!config || !hasCredentials(config) || config.history_months === 0) {
       return 0;
     }
+    backfillStopped = false;
+    backfillAt = now();
     const months = await backfillMonths();
     const days = boxes.length > 0 ? await backfillDays() : 0;
     if (months + days > 0) {
@@ -426,14 +457,7 @@ export function createSite({
     },
 
     /** Fetch the monthly history not fetched yet. */
-    backfillHistory() {
-      if (!backfillInFlight) {
-        backfillInFlight = doBackfill().finally(() => {
-          backfillInFlight = null;
-        });
-      }
-      return backfillInFlight;
-    },
+    backfillHistory: startBackfill,
 
     /** Called after every successful refresh (alerts, widget refresh). */
     onRefresh(listener) {
