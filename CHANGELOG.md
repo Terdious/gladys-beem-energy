@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-10-23
+
 ### Fixed
 
 - Daily history: a week whose answer holds no day of any box is asked again
@@ -98,7 +100,8 @@ the notes of the version's GitHub Release.
 - Configuration actions: test the connection, diagnose the boxes, reload the
   history. Protection against the rate limit of the Beem API.
 
-[Unreleased]: https://github.com/Terdious/gladys-beem-energy/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/Terdious/gladys-beem-energy/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/Terdious/gladys-beem-energy/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Terdious/gladys-beem-energy/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Terdious/gladys-beem-energy/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/Terdious/gladys-beem-energy/releases/tag/v1.0.0
