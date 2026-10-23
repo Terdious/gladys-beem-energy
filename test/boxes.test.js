@@ -5,6 +5,7 @@ import { createFakeGladys } from '@gladysassistant/integration-sdk/testing';
 
 import {
   STALE_PRODUCTION_MS,
+  describeShape,
   describeBox,
   rawBoxesOf,
   readSummary,
@@ -99,4 +100,13 @@ test('a box device is accepted by Gladys and keyed on the cloud id', async () =>
     device.features.map((feature) => feature.type),
     ['power', 'index', 'daily-production', 'integer'],
   );
+});
+
+test('the shape of a payload, never its values', () => {
+  assert.equal(
+    describeShape({ devices: [{ id: 7, measures: [{ startDate: 'x', value: 3 }] }], ok: true }),
+    '{devices:[1× {id:number,measures:[1× {startDate:string,value:number}]}],ok:boolean}',
+  );
+  assert.equal(describeShape([]), '[]');
+  assert.equal(describeShape(null), 'null');
 });

@@ -135,3 +135,16 @@ export function startOfDayKey(key, timeZone) {
   }
   return at;
 }
+
+/**
+ * An instant as a local ISO time with its UTC offset, the way the Beem
+ * application sends its ranges: `2026-10-16T00:00:00+02:00`.
+ */
+export function localIso(at, timeZone) {
+  const { year, month, day, hour, minute, second } = localParts(at, timeZone);
+  const wall = Date.UTC(year, month - 1, day, hour, minute, second);
+  const offset = Math.round((wall - Math.floor(at / 1000) * 1000) / 60000);
+  const sign = offset < 0 ? '-' : '+';
+  const abs = Math.abs(offset);
+  return `${year}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}:${pad(second)}${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`;
+}

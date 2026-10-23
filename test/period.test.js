@@ -11,6 +11,7 @@ import {
   viewButtons,
   windowOf,
 } from '../src/dashboard/period.js';
+import { localIso } from '../src/time.js';
 
 // Thursday 22 October 2026, 15:00 in Paris (UTC+2).
 const NOW = Date.parse('2026-10-22T13:00:00.000Z');
@@ -99,5 +100,14 @@ test('the buttons: the period form, previous, then next once stepped back', () =
   assert.deepEqual(
     back.map((button) => button.action.key),
     ['period', 'next'],
+  );
+});
+
+test('local ISO times carry their offset, summer and winter', () => {
+  assert.equal(localIso(Date.parse('2026-10-11T22:00:00.000Z'), TZ), '2026-10-12T00:00:00+02:00');
+  assert.equal(localIso(Date.parse('2026-12-01T23:00:00.000Z'), TZ), '2026-12-02T00:00:00+01:00');
+  assert.equal(
+    localIso(Date.parse('2026-12-01T23:00:00.000Z'), 'America/Martinique'),
+    '2026-12-01T19:00:00-04:00',
   );
 });

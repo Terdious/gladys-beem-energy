@@ -10,6 +10,20 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Daily history: a week whose answer holds no day of any box is asked again
+  at the next start instead of never, and the range is sent as local times
+  with their offset, like the Beem application does
+  ([#5](https://github.com/Terdious/gladys-beem-energy/issues/5)).
+
+### Added
+
+- **Diagnose the boxes** shows the shape of the hourly history answer and of a
+  cloud summary entry (field names and types only, no value) when no past day
+  could be read, to fix the parsing on a real account
+  ([#5](https://github.com/Terdious/gladys-beem-energy/issues/5)).
+
 ## [1.2.0] - 2026-10-23
 
 ### Added

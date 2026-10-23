@@ -23,7 +23,14 @@
 import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
 
 import { BeemApiError, createBeemClient } from './beem/client.js';
-import { describeBox, intradayDays, rawBoxesOf, readSummary, summariesById } from './beem/boxes.js';
+import {
+  describeBox,
+  describeShape,
+  intradayDays,
+  rawBoxesOf,
+  readSummary,
+  summariesById,
+} from './beem/boxes.js';
 import { boxIds, boxStates, buildBoxDevice } from './devices/box.js';
 import { hasCredentials } from './config.js';
 import { DAY_RETENTION } from './store.js';
@@ -34,6 +41,7 @@ import {
   monthKeyOf,
   parseMonthKey,
   shiftDay,
+  localIso,
   shiftMonth,
   startOfDayKey,
 } from './time.js';
@@ -114,7 +122,14 @@ export function createSite({
   let backfillInFlight = null;
   const listeners = new Set();
   // What the daily backfill met: shown by the diagnostic action.
-  const dayHistory = { requests: 0, unmatched: [], error: null };
+  const dayHistory = {
+    requests: 0,
+    backfilled: 0,
+    unmatched: [],
+    error: null,
+    shape: null,
+    summaryShape: null,
+  };
 
   async function reportStatus(error) {
     const key = error ? `error:${error}` : 'ok';
@@ -184,7 +199,11 @@ export function createSite({
       const timeZone = config.timezone;
       const { year, month } = localParts(at, timeZone);
       const currentMonth = monthKeyOf({ year, month });
-      const summaries = summariesById(await client.getBoxSummary({ year, month }));
+      const raw = await client.getBoxSummary({ year, month });
+      if (raw.length > 0) {
+        dayHistory.summaryShape = describeShape(raw[0], 2);
+      }
+      const summaries = summariesById(raw);
 
       // Month change: one request per month left, shared by the boxes.
       const previousFinals = new Map();
@@ -312,9 +331,10 @@ export function createSite({
       }
       let payload;
       try {
+        // Local times with their offset, like the Beem application sends.
         payload = await client.getProductionIntraday({
-          from: new Date(startOfDayKey(first, timeZone)).toISOString(),
-          to: new Date(startOfDayKey(shiftDay(first, DAYS_PER_REQUEST), timeZone)).toISOString(),
+          from: localIso(startOfDayKey(first, timeZone), timeZone),
+          to: localIso(startOfDayKey(shiftDay(first, DAYS_PER_REQUEST), timeZone), timeZone),
         });
       } catch (err) {
         dayHistory.error = err.message;
@@ -323,6 +343,7 @@ export function createSite({
       }
       fetched += 1;
       const { days, unmatched } = intradayDays(payload, boxes, dayOf);
+      dayHistory.shape = describeShape(payload);
       if (days.size === 0 && unmatched.length > 0) {
         dayHistory.unmatched = [...new Set(unmatched)];
         logger.warn(
@@ -341,7 +362,14 @@ export function createSite({
           }
         }
       }
-      store.markDaysFetched(first);
+      if (any) {
+        dayHistory.backfilled += 1;
+        store.markDaysFetched(first);
+      } else {
+        // Nothing usable: asked again at the next start (an answer the
+        // parsing does not read yet must not be skipped forever).
+        logger.info(`Daily history from ${first}: no day in the answer (${dayHistory.shape})`);
+      }
       empty = any ? 0 : empty + 1;
       if (empty >= EMPTY_MONTHS_BEFORE_STOP) {
         break;

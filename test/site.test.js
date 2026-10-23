@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { boxIds } from '../src/devices/box.js';
+import { ACTIONS } from '../src/actions.js';
 import { STORE_SAVE_INTERVAL_MS } from '../src/site.js';
 import { createStore } from '../src/store.js';
 import { setupSite, tempDir } from './helpers/setup.js';
@@ -232,7 +233,8 @@ test('the daily history is backfilled from the hourly production, each week once
   // 1 month of history: 31 days, 4 weeks of 7 days.
   assert.equal(intradayCalls.length, 4);
   assert.equal(intradayCalls[0].query.scale, 'PT60M');
-  assert.equal(intradayCalls[0].query.from, '2026-10-11T22:00:00.000Z');
+  assert.equal(intradayCalls[0].query.from, '2026-10-12T00:00:00+02:00');
+  assert.equal(intradayCalls[0].query.to, '2026-10-19T00:00:00+02:00');
   const { days } = site.store.history('101');
   assert.equal(days['2026-10-18'], 1000, '10 hours of 100 Wh');
   assert.equal(days['2026-10-19'], 1500, 'the live day keeps the summary total');
@@ -254,4 +256,23 @@ test('an intraday payload matching no box stops the backfill and is diagnosed', 
   await site.backfillHistory();
   assert.equal(beem.callsTo('/production/energy/intraday').length, 1);
   assert.deepEqual(site.dayHistory().unmatched, ['houseId,measures']);
+});
+
+test('an answer without any day is asked again at the next start, and its shape diagnosed', async () => {
+  const { gladys, site, beem } = await setupSite({
+    at: NOON,
+    boxes: threePhaseBoxes().slice(0, 1),
+    summaries: { '2026-10': [summary({ boxId: 101, month: 40000, at: NOON })] },
+    config: { history_months: 2 },
+  });
+  beem.state.intraday = () => ({ devices: [], total: 0 });
+  await site.refresh();
+  await site.backfillHistory();
+  assert.equal(beem.callsTo('/production/energy/intraday').length, 2, 'two empty weeks stop it');
+  await site.backfillHistory();
+  assert.equal(beem.callsTo('/production/energy/intraday').length, 4, 'asked again');
+  const message = await ACTIONS.diagnostic(gladys, { fields: {}, site });
+  assert.match(message.en, /Hourly history answer: \{devices:\[\],total:number\}/);
+  assert.match(message.fr, /Entrée du relevé : \{boxId:number,/);
+  assert.ok(!message.en.includes('40000'), 'no value, only the shape');
 });
