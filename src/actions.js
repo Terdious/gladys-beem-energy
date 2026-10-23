@@ -106,6 +106,15 @@ export const ACTIONS = {
       lines.en.push(`Daily history: ${days} day(s) per box.`);
       lines.fr.push(`Historique journalier : ${days} jour(s) par box.`);
     }
+    if (history.requests > 0 && history.backfilled === 0 && history.shape) {
+      // Field names and types only: what the parsing needs, no value.
+      lines.en.push(`Hourly history answer: ${history.shape}`);
+      lines.fr.push(`Réponse de l'historique horaire : ${history.shape}`);
+      if (history.summaryShape) {
+        lines.en.push(`Summary entry: ${history.summaryShape}`);
+        lines.fr.push(`Entrée du relevé : ${history.summaryShape}`);
+      }
+    }
     return { en: lines.en.join('\n'), fr: lines.fr.join('\n') };
   },
 

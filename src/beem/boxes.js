@@ -219,3 +219,31 @@ export function intradayDays(payload, boxes, dayOf) {
   }
   return { days, unmatched };
 }
+
+/**
+ * The shape of a payload, never its values: field names, array lengths
+ * (and the shape of their first item), value types. What the diagnostic
+ * shows of an undocumented answer, to fix its parsing without asking for
+ * any data.
+ * @param {unknown} value
+ * @param {number} [depth] levels described
+ * @returns {string}
+ */
+export function describeShape(value, depth = 5) {
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return '[]';
+    }
+    return depth <= 0
+      ? `[${value.length}]`
+      : `[${value.length}× ${describeShape(value[0], depth - 1)}]`;
+  }
+  if (value && typeof value === 'object') {
+    const keys = Object.keys(value).sort();
+    if (depth <= 0 || keys.length === 0) {
+      return `{${keys.join(',')}}`;
+    }
+    return `{${keys.map((key) => `${key}:${describeShape(value[key], depth - 1)}`).join(',')}}`;
+  }
+  return value === null ? 'null' : typeof value;
+}
