@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-10-23
+
 ### Fixed
 
 - Daily history: the hourly production of a week gets 60 s to answer instead
@@ -108,7 +110,8 @@ the notes of the version's GitHub Release.
 - Configuration actions: test the connection, diagnose the boxes, reload the
   history. Protection against the rate limit of the Beem API.
 
-[Unreleased]: https://github.com/Terdious/gladys-beem-energy/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/Terdious/gladys-beem-energy/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/Terdious/gladys-beem-energy/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/Terdious/gladys-beem-energy/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/Terdious/gladys-beem-energy/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Terdious/gladys-beem-energy/compare/v1.0.0...v1.1.0
