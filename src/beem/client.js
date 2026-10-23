@@ -10,6 +10,9 @@
 //   GET  /devices               -> { beemboxes: [...], batteries: [...], energySwitches: [...] }
 //   POST /box/summary           { month, year } -> [{ boxId, wattHour, totalDay, totalMonth,
 //                                                    lastDbm, lastProduction }]
+//   GET  /production/energy/intraday?from&to&scale=PT60M
+//                               -> { devices: [{ ..., measures: [{ startDate, value }] }] }
+//                                  (Wh per hour, the history the Beem application charts)
 //
 // Rate limit: the Beem API answers 429 to bursts of logins and then refuses
 // every login for a while. The client therefore keeps its access token (about
@@ -192,6 +195,17 @@ export function createBeemClient({
     async getBoxSummary({ month, year }) {
       const data = await request('POST', '/box/summary', { month, year });
       return Array.isArray(data) ? data : [];
+    },
+
+    /**
+     * Hourly production of the account's devices over [from, to).
+     * @param {{ from: string, to: string, scale?: string }} range ISO instants
+     * @returns {Promise<object>}
+     */
+    async getProductionIntraday({ from, to, scale = 'PT60M' }) {
+      const query = new URLSearchParams({ from, to, scale });
+      const data = await request('GET', `/production/energy/intraday?${query}`);
+      return data && typeof data === 'object' ? data : {};
     },
 
     /** Forget the token and the 429 lock (credentials changed). */

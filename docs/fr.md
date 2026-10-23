@@ -38,10 +38,12 @@ Chaque box du compte devient un appareil Gladys, avec :
   propre index à partir du total du mois, et récupère le total final du mois
   précédent au changement de mois. Rien n'est perdu à minuit, ni pendant un
   arrêt du conteneur : le relevé suivant rattrape la production manquée.
-- **Historique mensuel** : au démarrage, l'intégration demande au cloud Beem la
+- **Historique** : au démarrage, l'intégration demande au cloud Beem la
   production des mois passés (24 par défaut, une requête toutes les quelques
-  secondes, une seule fois par mois : un mois passé ne change plus). Les
-  chiffres de l'année, le total, les économies et l'amortissement en partent.
+  secondes, une seule fois par mois : un mois passé ne change plus), puis celle
+  des jours passés (historique horaire, une semaine par requête). Les chiffres
+  de l'année, le total, les économies, l'amortissement et la navigation dans les
+  widgets en partent.
 - Le badge de transport indique **cloud** pour une box présente dans le relevé
   du cloud, **injoignable** pour une box qui en est absente.
 
@@ -91,23 +93,49 @@ widget** :
   et le total depuis le premier mois connu.
 - **Installation solaire** : toute l'installation, en **monophasé** (les box
   choisies, ou toutes) ou en **triphasé** : attribuez les box de chaque phase
-  (L1, L2, L3) dans les réglages du widget. Courbe de puissance du jour (une
-  courbe par phase en triphasé), puissance, jour, mois, année, part de la
-  puissance crête, une ligne par phase (puissance · production du jour), l'**équilibre
-  des phases** (en alerte au-delà du seuil réglé, 500 W par défaut), les box
-  muettes ou à faible rendement, et les erreurs d'attribution (une box dans
-  deux phases, ou dans aucune).
-- **Économies solaires** : économies du jour, du mois, de l'année et au total,
-  jauge et date d'**amortissement**, valeur d'un kWh solaire, parts
-  autoconsommée et injectée, CO2 évité, et les économies des 12 derniers mois.
-- **Historique de production** : barres des 30 derniers jours, ou des 12 ou 24
-  derniers mois ; total et moyenne de la période, meilleur jour ou mois, le mois
-  en cours comparé au même mois de l'an dernier, classement des box du mois
-  (avec leur rendement par kWc).
+  (L1, L2, L3) dans les réglages du widget. Périodes : **12 heures** et **jour**
+  (courbe de puissance, une courbe par phase en triphasé), **semaine** et
+  **mois** (production par jour), **année** (production par mois). Sur la
+  journée en cours : puissance, jour, mois, année, part de la puissance crête,
+  une ligne par phase (puissance · production du jour), l'**équilibre des
+  phases** (en alerte au-delà du seuil réglé, 500 W par défaut), les box muettes
+  ou à faible rendement. Sur une autre période : production, puissance max ou
+  moyenne par jour, meilleur jour, rendement par kWc et la part de chaque phase.
+  Les erreurs d'attribution (une box dans deux phases, ou dans aucune) sont
+  toujours signalées.
+- **Économies solaires** : économies par **mois** (barres par jour), par
+  **année** (par mois) ou sur **toutes les années** ; économie et production de
+  la période, jauge et date d'**amortissement**, total depuis le début, valeur
+  d'un kWh solaire, parts autoconsommée et injectée de la période, CO2 évité.
+- **Historique de production** : production par **mois** (barres par jour),
+  par **année** (par mois) ou sur **toutes les années** ; production, moyenne et
+  meilleur jour / mois / année de la période, comparaison à **la même période un
+  an plus tôt** (à jours ou mois égaux), classement des box sur la période (avec
+  leur rendement par kWc). Le réglage **Période par défaut** choisit la période
+  affichée d'abord.
 
-> Les jours de l'historique s'accumulent à partir de l'installation de
-> l'intégration : le cloud Beem ne donne pas l'historique jour par jour, seulement
-> mois par mois.
+### Changer de période et naviguer
+
+Comme sur les graphiques de Gladys, les widgets Installation, Économies et
+Historique ont leurs boutons :
+
+- **Période** (le nom de la période affichée) : ouvre un choix des périodes du
+  widget. Revient à la période en cours.
+- **Précédent** / **Suivant** : recule ou avance d'une période (jour, semaine,
+  mois, année…). Précédent n'apparaît que s'il y a des données avant, Suivant
+  qu'une fois revenu en arrière.
+
+La période est indiquée dans le titre du graphique. Elle est retenue par widget
+(par réglages) tant que l'intégration tourne : deux tableaux de bord affichant le
+même widget avec les mêmes réglages partagent la même période, et un redémarrage
+revient à la période par défaut. Sur un Gladys antérieur à 5.2, le bouton
+Période passe simplement à la période suivante.
+
+> Données : les courbes de puissance sont gardées **14 jours** (moyennes sur
+> 5 minutes). La production **jour par jour** des jours passés est récupérée au
+> démarrage depuis l'historique horaire de l'application Beem (jusqu'à 400 jours,
+> une semaine par requête) ; l'action **Diagnostiquer les box** indique combien
+> de jours chaque box a. Les mois viennent de l'historique mensuel.
 
 ### Exemple : 3 phases, 6 box
 

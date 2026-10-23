@@ -22,8 +22,9 @@
 // half-hour in Gladys).
 //
 // Also kept per box: the total of each day seen (last 400 days), of each month
-// (live, and the history fetched from the cloud at startup), and the average
-// power per 5-minute bucket of the last 48 hours (the inline charts).
+// (live, and the history fetched from the cloud at startup: months from the
+// summary, days from the intraday production), and the average power per
+// 5-minute bucket of the last 14 days (the inline charts).
 //
 // The index must survive restarts (falling back to 0 would read as a huge
 // negative delta): the file is written atomically, every few minutes and at
@@ -41,7 +42,8 @@ export const STORE_VERSION = 1;
 export const STORE_FILE = 'beem-energy.json';
 export const DAY_RETENTION = 400;
 export const SAMPLE_BUCKET_MS = 5 * 60 * 1000;
-export const SAMPLE_RETENTION_MS = 48 * 60 * 60 * 1000;
+// 14 days: the power curves of the past days the site widget steps back to.
+export const SAMPLE_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 
 /** The data directory: /data in the container, overridable for the tests. */
 export const dataDir = () => process.env.BEEM_DATA_DIR || '/data';
@@ -94,7 +96,13 @@ function loadBox(raw) {
  * @param {{ dir?: string }} [options]
  */
 export function createStore({ dir } = {}) {
-  let state = { version: STORE_VERSION, boxes: {}, fetchedMonths: [], events: {} };
+  let state = {
+    version: STORE_VERSION,
+    boxes: {},
+    fetchedMonths: [],
+    fetchedDays: [],
+    events: {},
+  };
   let dirty = false;
 
   const boxState = (id) => {
@@ -119,6 +127,9 @@ export function createStore({ dir } = {}) {
           boxes,
           fetchedMonths: Array.isArray(raw?.fetchedMonths)
             ? raw.fetchedMonths.filter((key) => typeof key === 'string')
+            : [],
+          fetchedDays: Array.isArray(raw?.fetchedDays)
+            ? raw.fetchedDays.filter((key) => typeof key === 'string')
             : [],
           events: raw?.events && typeof raw.events === 'object' ? raw.events : {},
         };
@@ -226,6 +237,35 @@ export function createStore({ dir } = {}) {
       }
     },
 
+    /**
+     * Store the total of a past day of a box (history from the cloud). A day
+     * the integration saw live keeps its live total: the summary is exact.
+     */
+    setDay(id, key, wh) {
+      const box = boxState(id);
+      if (isFiniteNumber(wh) && wh >= 0 && box.days[key] === undefined) {
+        box.days[key] = wh;
+        const keys = Object.keys(box.days).sort();
+        for (const old of keys.slice(0, Math.max(0, keys.length - DAY_RETENTION))) {
+          delete box.days[old];
+        }
+        dirty = true;
+      }
+    },
+
+    /** Remember that the days of a past period were fetched. */
+    markDaysFetched(key) {
+      if (!state.fetchedDays.includes(key)) {
+        state.fetchedDays.push(key);
+        state.fetchedDays = state.fetchedDays.sort().slice(-DAY_RETENTION);
+        dirty = true;
+      }
+    },
+
+    areDaysFetched(key) {
+      return state.fetchedDays.includes(key);
+    },
+
     isMonthFetched(key) {
       return state.fetchedMonths.includes(key);
     },
@@ -233,6 +273,7 @@ export function createStore({ dir } = {}) {
     /** Forget the fetched marks: the next backfill asks every month again. */
     clearFetchedMonths() {
       state.fetchedMonths = [];
+      state.fetchedDays = [];
       dirty = true;
     },
 
@@ -246,10 +287,10 @@ export function createStore({ dir } = {}) {
       return { days: { ...(box?.days ?? {}) }, months: { ...(box?.months ?? {}) } };
     },
 
-    /** 5-minute average powers of a box since `from`: [{ t, w }]. */
-    samples(id, from = 0) {
+    /** 5-minute average powers of a box in [from, to): [{ t, w }]. */
+    samples(id, from = 0, to = Infinity) {
       return (state.boxes[id]?.samples ?? [])
-        .filter(([t]) => t >= from)
+        .filter(([t]) => t >= from && t < to)
         .map(([t, total, count]) => ({ t, w: total / count }));
     },
 

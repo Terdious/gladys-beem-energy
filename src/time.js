@@ -119,3 +119,19 @@ export function localTime(at, timeZone) {
   const { hour, minute } = localParts(at, timeZone);
   return `${pad(hour)}:${pad(minute)}`;
 }
+
+/**
+ * The instant (ms) a local day starts in a timezone (DST-aware): the first
+ * minute whose local date is the day.
+ * @param {string} key `YYYY-MM-DD`
+ * @param {string} timeZone
+ */
+export function startOfDayKey(key, timeZone) {
+  const [year, month, day] = key.split('-').map(Number);
+  // Every timezone is within 14 hours of UTC: start before, step 15 min.
+  let at = Date.UTC(year, month - 1, day) - 14 * 60 * 60 * 1000;
+  while (dayKey(at, timeZone) < key) {
+    at += 15 * 60 * 1000;
+  }
+  return at;
+}

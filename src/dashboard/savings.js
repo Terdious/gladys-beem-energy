@@ -1,19 +1,23 @@
 // -----------------------------------------------------------------------------
 // The `savings` widget: what the panels are worth (src/savings.js).
 //
-// Tiles: saved today, this month, this year and since the first month known,
-// a gauge of the payback (savings over the installation cost, when given).
-// Status rows: the price used for one solar kWh (and the off-peak share of
-// the production in peak / off-peak), the self-consumed and exported shares,
-// the payback date at the pace of the last 12 months, the CO2 avoided. The
-// chart: the savings of each of the last 12 months.
+// The period is chosen live (src/dashboard/period.js): a month (savings per
+// day), a year (per month) or all the years (per year), and "Previous" /
+// "Next" step through the past months and years.
 //
-// Content budget of the core: 1 heading (a title of its own only), 1 chart, 5 tiles, 1 status.
+// Tiles: saved and produced over the period, the payback gauge (savings over
+// the installation cost, when given), the savings since the first month
+// known. Status rows: the price used for one solar kWh (and the off-peak
+// share of the production in peak / off-peak), the self-consumed and
+// exported shares of the period, the payback date at the pace of the last 12
+// months, the CO2 avoided in total.
+//
+// Content budget of the core: 8 components, buttons included.
 // -----------------------------------------------------------------------------
 
 import { WIDGET_COLORS } from '@gladysassistant/integration-sdk';
 
-import { allMonths, monthlySeries, powerSeries, siteFigures } from '../production.js';
+import { allMonths, firstMonthOf, powerSeries, siteFigures } from '../production.js';
 import { buildTariff, measuredSolarProfile, paybackOf, valueOf } from '../savings.js';
 import { minuteOfDay } from '../time.js';
 import {
@@ -23,9 +27,9 @@ import {
   NOT_CONNECTED,
   fitRows,
   kwhText,
+  kwhValue,
   messageContent,
   money,
-  monthInstant,
   monthLabel,
   round,
   siteSelection,
@@ -33,8 +37,22 @@ import {
   headingOf,
   titleOf,
 } from './common.js';
+import {
+  entryInstant,
+  hasPrevious,
+  labelText,
+  sharedViews,
+  viewButtons,
+  viewMessage,
+  windowEnergy,
+  windowOf,
+} from './period.js';
 
 export const SAVINGS_WIDGET = 'savings';
+
+const MAX_COMPONENTS = 8;
+
+export const SAVINGS_VIEW = { periods: ['month', 'year', 'all'], defaultPeriod: 'month' };
 
 const NO_TARIFF = T(
   'Enter your electricity price in the Configuration tab of the integration to estimate the savings.',
@@ -87,7 +105,11 @@ function etaText(months) {
  * @param {Array<object>} boxes snapshots
  * @param {{ now: number, config: object, title: string|object }} options
  */
-export function savingsContent(site, boxes, { now, config, title }) {
+export function savingsContent(
+  site,
+  boxes,
+  { now, config, title, view = { period: 'month', offset: 0 }, periods = SAVINGS_VIEW.periods },
+) {
   const timeZone = config.timezone;
   const { tariff, error } = buildTariff(config, {
     profile: measuredProfile(site, boxes, now, timeZone),
@@ -106,33 +128,39 @@ export function savingsContent(site, boxes, { now, config, title }) {
     tariff,
   });
 
+  const firstMonth = firstMonthOf(boxes);
+  const window = windowOf(view.period, view.offset, now, timeZone, {
+    firstYear: firstMonth?.slice(0, 4),
+  });
+  const energy = windowEnergy(site.store, boxes, window, now, timeZone);
+  const period = energy.total === null ? null : valueOf(energy.total, tariff);
+  const label = labelText(window.label);
+
   const components = headingOf(title);
-  const series = monthlySeries(boxes, now, timeZone, 12).filter((month) => month.kwh !== null);
-  if (series.length > 0) {
+  const known = energy.entries.filter((entry) => entry.kwh !== null);
+  if (known.length > 0) {
     components.push({
       type: 'chart',
       series: [
         {
           name: T('Savings', 'Économies'),
-          points: series.map((month) => ({
-            t: monthInstant(month.key),
-            v: round(value(month.kwh), 2),
+          points: known.map((entry) => ({
+            t: entryInstant(window, entry.key),
+            v: round(value(entry.kwh), 2),
           })),
         },
       ],
       chart_type: 'bar',
-      title: T('Savings per month', 'Économies par mois'),
+      title: T(`Savings · ${label.en}`, `Économies · ${label.fr}`),
       unit: '€',
     });
   }
-  components.push(
-    tile(round(value(figures.todayKwh), 2), '€', T('Today', "Aujourd'hui"), 'trending-up'),
-    tile(round(value(figures.monthKwh), 2), '€', T('This month', 'Ce mois-ci'), 'calendar'),
-    tile(round(value(figures.yearKwh), 0), '€', T('This year', 'Cette année'), 'bar-chart-2'),
-    tile(round(lifetime.total, 0), '€', T('In total', 'Au total'), 'award'),
-  );
+  const tiles = [
+    tile(round(period?.total ?? null, 2), '€', T('Saved', 'Économisé'), 'trending-up'),
+    tile(kwhValue(energy.total), 'kWh', T('Produced', 'Produit'), 'zap'),
+  ];
   if (payback) {
-    components.push({
+    tiles.push({
       type: 'gauge',
       value: Math.round(payback.progress * 100),
       min: 0,
@@ -142,6 +170,7 @@ export function savingsContent(site, boxes, { now, config, title }) {
       color: payback.progress >= 1 ? WIDGET_COLORS.SUCCESS : WIDGET_COLORS.INFO,
     });
   }
+  tiles.push(tile(round(lifetime.total, 0), '€', T('In total', 'Au total'), 'award'));
 
   const rows = [
     {
@@ -162,7 +191,7 @@ export function savingsContent(site, boxes, { now, config, title }) {
         `Autoconsommé (${Math.round(tariff.selfRate * 100)} %)`,
       ),
       icon: 'home',
-      value: `${kwhText(lifetime.selfKwh)} · ${money(lifetime.avoided)}`,
+      value: period ? `${kwhText(period.selfKwh)} · ${money(period.avoided)}` : UNKNOWN,
       color: WIDGET_COLORS.SUCCESS,
     },
   ];
@@ -172,9 +201,11 @@ export function savingsContent(site, boxes, { now, config, title }) {
         ? T('Sold', 'Revendu')
         : T('Given to the grid', 'Injecté sans revente'),
       icon: 'upload',
-      value: tariff.resaleEnabled
-        ? `${kwhText(lifetime.exportedKwh)} · ${money(lifetime.resale)}`
-        : kwhText(lifetime.exportedKwh),
+      value: !period
+        ? UNKNOWN
+        : tariff.resaleEnabled
+          ? `${kwhText(period.exportedKwh)} · ${money(period.resale)}`
+          : kwhText(period.exportedKwh),
       color: tariff.resaleEnabled ? WIDGET_COLORS.INFO : WIDGET_COLORS.NEUTRAL,
     });
   }
@@ -195,7 +226,7 @@ export function savingsContent(site, boxes, { now, config, title }) {
   if (config.co2_factor > 0) {
     const kg = ((figures.lifetimeKwh ?? 0) * config.co2_factor) / 1000;
     rows.push({
-      label: T('CO2 avoided', 'CO2 évité'),
+      label: T('CO2 avoided in total', 'CO2 évité au total'),
       icon: 'wind',
       value: kg >= 1000 ? `${round(kg / 1000, 2)} t` : `${round(kg, 1)} kg`,
       color: WIDGET_COLORS.SUCCESS,
@@ -208,22 +239,46 @@ export function savingsContent(site, boxes, { now, config, title }) {
     value: first ? monthLabel(first.key) : UNKNOWN,
     color: WIDGET_COLORS.NEUTRAL,
   });
+  if (known.length === 0) {
+    rows.unshift({
+      label: T('Period', 'Période'),
+      icon: 'calendar',
+      value: T(`${label.en} · no data`, `${label.fr} · aucune donnée`),
+      color: WIDGET_COLORS.NEUTRAL,
+    });
+  }
   components.push({ type: 'status', items: fitRows(rows) });
+  components.push(...viewButtons(view, periods, hasPrevious(window, { now, firstMonth })));
+  components.push(...tiles.slice(0, Math.max(0, MAX_COMPONENTS - components.length)));
   return { ttl_seconds: 300, components };
 }
 
+const boxesOf = (all, settings) => {
+  const { boxes } = siteSelection(all, { devices: settings.devices });
+  return boxes.length > 0 ? boxes : all;
+};
+
 export const savingsWidget = {
-  async get(_gladys, { settings = {}, site }) {
-    const config = site.config();
+  async get(_gladys, { settings = {}, site, views = sharedViews }) {
     const all = site.snapshots();
     if (all.length === 0) {
       return messageContent(site.lastRefreshAt() === null ? NOT_CONNECTED : NO_BOX);
     }
-    const { boxes } = siteSelection(all, { devices: settings.devices });
-    return savingsContent(site, boxes.length > 0 ? boxes : all, {
+    return savingsContent(site, boxesOf(all, settings), {
       now: Date.now(),
-      config,
+      config: site.config(),
       title: titleOf(settings, null),
+      view: views.get(SAVINGS_WIDGET, settings, SAVINGS_VIEW),
     });
+  },
+
+  async action(_gladys, { actionKey, settings = {}, values, site, views = sharedViews }) {
+    const view = views.apply(SAVINGS_WIDGET, settings, SAVINGS_VIEW, actionKey, values);
+    const firstMonth = firstMonthOf(boxesOf(site.snapshots(), settings));
+    return viewMessage(
+      windowOf(view.period, view.offset, Date.now(), site.config().timezone, {
+        firstYear: firstMonth?.slice(0, 4),
+      }),
+    );
   },
 };

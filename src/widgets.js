@@ -5,17 +5,21 @@
 //                the peak power, day / month / yield, signal, panels, alert.
 //   - `site`     (src/dashboard/site.js): the whole installation,
 //                single-phase or three-phase (boxes assigned to L1, L2, L3),
-//                power curve of the day, phase balance, underperforming boxes.
+//                over 12 hours, a day, a week, a month or a year, phase
+//                balance, underperforming boxes.
 //   - `savings`  (src/dashboard/savings.js): the savings estimate of the
-//                tariff of the Configuration tab, payback and CO2 avoided.
-//   - `history`  (src/dashboard/history.js): bars per day or per month,
+//                tariff of the Configuration tab per month, year or all the
+//                years, payback and CO2 avoided.
+//   - `history`  (src/dashboard/history.js): bars per day, month or year,
 //                records, year-over-year comparison, ranking of the boxes.
 //
 // The manifest allows at most 5 widgets and their keys are stored in the
 // users' dashboards: the fifth slot is kept free on purpose.
 //
-// index.js registers `get` with onWidgetGet. The content budget of the core
-// (8 components, 1 focal, 6 tiles, 1 status) decides what each widget shows.
+// index.js registers `get` with onWidgetGet, and `action` (the period
+// buttons of src/dashboard/period.js) with onWidgetAction. The content budget
+// of the core (8 components buttons included, 1 focal, 6 tiles, 1 status,
+// 4 buttons) decides what each widget shows.
 // -----------------------------------------------------------------------------
 
 import { createLogger } from '@gladysassistant/integration-sdk';

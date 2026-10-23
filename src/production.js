@@ -139,7 +139,7 @@ export function allMonths(boxes, now, timeZone) {
 }
 
 /**
- * Site power per 5-minute bucket since `from`, from the store samples: the
+ * Site power per 5-minute bucket in [from, to), from the store samples: the
  * sum of the boxes averaged per bucket. A bucket where a box has no sample
  * counts it at 0 (asleep, or not read yet).
  * @param {ReturnType<typeof import('./store.js').createStore>} store
@@ -147,10 +147,10 @@ export function allMonths(boxes, now, timeZone) {
  * @param {number} from timestamp (ms)
  * @returns {Array<{ t: number, w: number }>}
  */
-export function powerSeries(store, boxes, from) {
+export function powerSeries(store, boxes, from, to = Infinity) {
   const buckets = new Map();
   for (const box of boxes) {
-    for (const { t, w } of store.samples(box.id, from)) {
+    for (const { t, w } of store.samples(box.id, from, to)) {
       buckets.set(t, (buckets.get(t) ?? 0) + w);
     }
   }
@@ -296,4 +296,66 @@ export function cutsOf(store, box, all, from) {
     }
   }
   return { count, lastAt };
+}
+
+/**
+ * The production of some boxes on given days (`YYYY-MM-DD`), today from the
+ * live reading: [{ key, kwh }], null for a day no box has.
+ */
+export function energyOfDays(boxes, keys, now, timeZone) {
+  const today = dayKey(now, timeZone);
+  return keys.map((key) => ({
+    key,
+    kwh: kwh(
+      sumKnown(
+        boxes.map((box) =>
+          key === today && box.reading.todayWh !== null
+            ? box.reading.todayWh
+            : box.history.days[key],
+        ),
+      ),
+    ),
+  }));
+}
+
+/** The production of some boxes in given months (`YYYY-MM`): [{ key, kwh }]. */
+export function energyOfMonths(boxes, keys, now, timeZone) {
+  const current = monthKey(now, timeZone);
+  return keys.map((key) => ({
+    key,
+    kwh: kwh(
+      sumKnown(
+        boxes.map((box) =>
+          key === current && box.reading.monthWh !== null
+            ? box.reading.monthWh
+            : box.history.months[key],
+        ),
+      ),
+    ),
+  }));
+}
+
+/** The production of some boxes in given years (`YYYY`): [{ key, kwh }]. */
+export function energyOfYears(boxes, years, now, timeZone) {
+  const months = allMonths(boxes, now, timeZone);
+  return years.map((year) => {
+    const of = months.filter((month) => month.key.startsWith(`${year}-`));
+    return { key: year, kwh: of.length === 0 ? null : of.reduce((t, m) => t + m.kwh, 0) };
+  });
+}
+
+/**
+ * The first month (`YYYY-MM`) any of the boxes produced in, from the monthly
+ * and the daily history, null when none.
+ */
+export function firstMonthOf(boxes) {
+  const keys = boxes.flatMap((box) => [
+    ...Object.entries(box.history.months)
+      .filter(([, wh]) => wh > 0)
+      .map(([key]) => key),
+    ...Object.entries(box.history.days)
+      .filter(([, wh]) => wh > 0)
+      .map(([key]) => key.slice(0, 7)),
+  ]);
+  return keys.length === 0 ? null : keys.sort()[0];
 }

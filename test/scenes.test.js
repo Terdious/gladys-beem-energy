@@ -69,7 +69,8 @@ test('test_connection lists the boxes; wrong credentials say so', async () => {
 test('diagnostic describes every box without any secret', async () => {
   const { gladys, site } = await producing();
   const message = await ACTIONS.diagnostic(gladys, { fields: {}, site });
-  assert.equal(message.en.split('\n').length, 6);
+  assert.equal(message.en.split('\n').length, 7);
+  assert.match(message.en, /Daily history: 1\/1\/1\/1\/1\/1 day\(s\) per box/);
   assert.match(message.fr, /Beem On L1 \(id 201, 1000 Wp\) : 450 W/);
   assert.ok(!message.en.includes('secret-password'));
 });

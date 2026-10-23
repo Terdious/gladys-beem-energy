@@ -4,22 +4,28 @@
 // Single-phase: the totals of the selected boxes (none: all of them).
 // Three-phase: the boxes assigned to L1, L2 and L3 in three device
 // multi-selects (one Beem box per phase and kit size, typically), one status
-// row per phase (power · today), and a phase balance row: the spread between
-// the highest and the lowest phase power, in warning past the
-// `imbalance_threshold` setting (a three-phase meter counts each phase on its
-// own: a production all on L1 does not offset a consumption on L2).
+// row per phase, and a phase balance row: the spread between the highest and
+// the lowest phase power, in warning past the `imbalance_threshold` setting
+// (a three-phase meter counts each phase on its own: a production all on L1
+// does not offset a consumption on L2).
 //
-// The power curve of the day comes from the 5-minute averages the
-// integration keeps (src/store.js): one series per phase in three-phase, the
-// total otherwise. Then the boxes that produce clearly less than the others,
-// and the assignment mistakes.
+// The period is chosen live (src/dashboard/period.js): 12 hours and day show
+// the power curve (the 5-minute averages of src/store.js, one curve per phase
+// in three-phase), week and month the production per day, year per month;
+// "Previous" / "Next" step through the past periods. The current day leads
+// with the live figures (power, today, month, year, share of the peak
+// power); a past or longer period with its production, average, best and
+// yield. The live alerts (silent boxes, low yield) show on the current
+// period only.
 //
-// Content budget of the core: 1 heading (a title of its own only), 1 chart, 5 tiles, 1 status.
+// Content budget of the core: 8 components, buttons included. The tiles get
+// the room the heading, the chart, the status and the buttons leave, the most
+// useful first.
 // -----------------------------------------------------------------------------
 
 import { WIDGET_COLORS } from '@gladysassistant/integration-sdk';
 
-import { powerSeries, siteFigures, underperformers } from '../production.js';
+import { firstMonthOf, powerSeries, siteFigures, underperformers } from '../production.js';
 import {
   T,
   UNKNOWN,
@@ -28,6 +34,7 @@ import {
   NO_BOX,
   NOT_CONNECTED,
   fitRows,
+  headingOf,
   kwhText,
   kwhValue,
   messageContent,
@@ -35,11 +42,21 @@ import {
   round,
   selectionAlerts,
   siteSelection,
-  startOfToday,
   tile,
-  headingOf,
   titleOf,
 } from './common.js';
+import {
+  PER_ENTRY,
+  entryInstant,
+  entryLabel,
+  hasPrevious,
+  labelText,
+  sharedViews,
+  viewButtons,
+  viewMessage,
+  windowEnergy,
+  windowOf,
+} from './period.js';
 
 export const SITE_WIDGET = 'site';
 
@@ -47,6 +64,13 @@ export const SITE_WIDGET = 'site';
 export const DEFAULT_IMBALANCE_THRESHOLD = 500;
 // Points of an inline chart series the core keeps.
 const MAX_CHART_POINTS = 300;
+// Components of a content the core keeps.
+const MAX_COMPONENTS = 8;
+
+export const SITE_VIEW = {
+  periods: ['hours_12', 'day', 'week', 'month', 'year'],
+  defaultPeriod: 'day',
+};
 
 /** The `imbalance_threshold` setting, a non-negative number of watts. */
 export function thresholdOf(settings) {
@@ -77,7 +101,19 @@ export function phaseBalance(phases, now, timeZone, threshold) {
   return { spread, highest: highest.label, warning: spread > threshold };
 }
 
-function phaseRows(phases, now, timeZone) {
+const reportingColor = (reporting, count) =>
+  reporting === count
+    ? WIDGET_COLORS.SUCCESS
+    : reporting === 0
+      ? WIDGET_COLORS.DANGER
+      : WIDGET_COLORS.WARNING;
+
+/** "L1 (2) · 1.9 kWc": the phase, its boxes, its peak power. */
+function phaseLabel(label, boxes, figures) {
+  return `${label} (${boxes.length})${figures.peakKw ? ` · ${round(figures.peakKw, 1)} kWc` : ''}`;
+}
+
+function livePhaseRows(phases, now, timeZone) {
   return phases.map(({ label, boxes }) => {
     if (boxes.length === 0) {
       return {
@@ -89,16 +125,33 @@ function phaseRows(phases, now, timeZone) {
     }
     const figures = siteFigures(boxes, now, timeZone);
     return {
-      // "L1 (2) · 1.4 kWp": the phase, its boxes, its peak power.
-      label: `${label} (${boxes.length})${figures.peakKw ? ` · ${round(figures.peakKw, 1)} kWc` : ''}`,
+      label: phaseLabel(label, boxes, figures),
       icon: 'git-commit',
       value: `${figures.powerW ?? UNKNOWN} W · ${kwhText(figures.todayKwh)}`,
-      color:
-        figures.reporting === boxes.length
-          ? WIDGET_COLORS.SUCCESS
-          : figures.reporting === 0
-            ? WIDGET_COLORS.DANGER
-            : WIDGET_COLORS.WARNING,
+      color: reportingColor(figures.reporting, boxes.length),
+    };
+  });
+}
+
+/** Phase rows of a past or long period: its production and its share. */
+function periodPhaseRows(site, phases, window, now, timeZone, total) {
+  return phases.map(({ label, boxes }) => {
+    if (boxes.length === 0) {
+      return {
+        label,
+        icon: 'git-commit',
+        value: T('No box', 'Aucune box'),
+        color: WIDGET_COLORS.NEUTRAL,
+      };
+    }
+    const figures = siteFigures(boxes, now, timeZone);
+    const energy = windowEnergy(site.store, boxes, window, now, timeZone).total;
+    const share = energy !== null && total > 0 ? ` · ${Math.round((energy / total) * 100)} %` : '';
+    return {
+      label: phaseLabel(label, boxes, figures),
+      icon: 'git-commit',
+      value: `${kwhText(energy)}${share}`,
+      color: WIDGET_COLORS.NEUTRAL,
     };
   });
 }
@@ -115,51 +168,59 @@ function balanceRow({ spread, highest, warning }) {
   };
 }
 
-/** The power curve of the day: one series per phase, or the total. */
-export function powerChart(site, selection, now, timeZone) {
-  const from = startOfToday(now, timeZone);
-  const toPoints = (boxes) =>
-    powerSeries(site.store, boxes, from)
-      .slice(-MAX_CHART_POINTS)
-      .map(({ t, w }) => ({ t: new Date(t).toISOString(), v: w }));
-  const series =
+/** The chart of a window: power curves, or production bars. */
+export function siteChart(site, selection, window, now, timeZone) {
+  const groups =
     selection.layout === LAYOUTS.THREE_PHASE
       ? selection.phases
           .filter((phase) => phase.boxes.length > 0)
-          .map((phase) => ({ name: phase.label, points: toPoints(phase.boxes) }))
-      : [{ name: T('Production', 'Production'), points: toPoints(selection.boxes) }];
-  const filled = series.filter((entry) => entry.points.length > 0);
-  if (filled.length === 0) {
+          .map((phase) => ({ name: phase.label, boxes: phase.boxes }))
+      : [{ name: T('Production', 'Production'), boxes: selection.boxes }];
+  const label = labelText(window.label);
+  if (window.kind === 'curve') {
+    const series = groups
+      .map((group) => ({
+        name: group.name,
+        points: powerSeries(site.store, group.boxes, window.from, window.to)
+          .slice(-MAX_CHART_POINTS)
+          .map(({ t, w }) => ({ t: new Date(t).toISOString(), v: w })),
+      }))
+      .filter((entry) => entry.points.length > 0);
+    if (series.length === 0) {
+      return null;
+    }
+    return {
+      type: 'chart',
+      series,
+      chart_type: 'area',
+      title: T(`Power · ${label.en}`, `Puissance · ${label.fr}`),
+      unit: 'W',
+      ...(window.current ? { now_marker: true } : {}),
+    };
+  }
+  const series = groups
+    .map((group) => ({
+      name: group.name,
+      points: windowEnergy(site.store, group.boxes, window, now, timeZone)
+        .entries.filter((entry) => entry.kwh !== null)
+        .map((entry) => ({ t: entryInstant(window, entry.key), v: kwhValue(entry.kwh) })),
+    }))
+    .filter((entry) => entry.points.length > 0);
+  if (series.length === 0) {
     return null;
   }
   return {
     type: 'chart',
-    series: filled,
-    chart_type: 'area',
-    title: T('Power today', 'Puissance du jour'),
-    unit: 'W',
-    now_marker: true,
+    series,
+    chart_type: 'bar',
+    title: T(`Production · ${label.en}`, `Production · ${label.fr}`),
+    unit: 'kWh',
   };
 }
 
-/**
- * Content of the site widget.
- * @param {object} site
- * @param {ReturnType<typeof siteSelection>} selection
- * @param {{ now: number, config: object, title: string|object, threshold: number, showChart: boolean }} options
- */
-export function siteContent(site, selection, { now, config, title, threshold, showChart }) {
-  const timeZone = config.timezone;
-  const { boxes } = selection;
-  const figures = siteFigures(boxes, now, timeZone);
-  const components = headingOf(title);
-  if (showChart) {
-    const chart = powerChart(site, selection, now, timeZone);
-    if (chart) {
-      components.push(chart);
-    }
-  }
-  components.push(
+/** Tiles of the live day: power, today, month, year, share of the peak. */
+function liveTiles(figures) {
+  return [
     tile(figures.powerW, 'W', T('Power', 'Puissance'), 'sun'),
     tile(kwhValue(figures.todayKwh), 'kWh', T('Today', "Aujourd'hui"), 'zap'),
     tile(kwhValue(figures.monthKwh), 'kWh', T('This month', 'Ce mois-ci'), 'calendar'),
@@ -173,74 +234,194 @@ export function siteContent(site, selection, { now, config, title, threshold, sh
       label: T('Of peak power', 'De la puissance crête'),
       color: figures.loadPercent === null ? WIDGET_COLORS.NEUTRAL : WIDGET_COLORS.PRIMARY,
     },
+  ];
+}
+
+/** Tiles of a past or long period: production, peak or average, best, yield. */
+function periodTiles(site, boxes, window, now, timeZone, energy, figures) {
+  const tiles = [tile(kwhValue(energy.total), 'kWh', T('Production', 'Production'), 'zap')];
+  if (window.kind === 'curve') {
+    const peak = powerSeries(site.store, boxes, window.from, window.to).reduce(
+      (best, sample) => Math.max(best, sample.w),
+      0,
+    );
+    tiles.push(tile(peak > 0 ? peak : null, 'W', T('Peak power', 'Puissance max'), 'sun'));
+  } else {
+    // The average leaves out the current day / month: it is not over yet.
+    const complete = energy.entries.filter(
+      (entry, i) => entry.kwh !== null && !(window.current && i === energy.entries.length - 1),
+    );
+    const average =
+      complete.length > 0
+        ? complete.reduce((total, entry) => total + entry.kwh, 0) / complete.length
+        : null;
+    tiles.push(tile(kwhValue(average), 'kWh', PER_ENTRY[window.kind], 'activity'));
+    const best = energy.entries.reduce(
+      (top, entry) => (entry.kwh !== null && entry.kwh > (top?.kwh ?? -1) ? entry : top),
+      null,
+    );
+    tiles.push(tile(kwhValue(best?.kwh ?? null), 'kWh', T('Best', 'Meilleur'), 'award'));
+  }
+  tiles.push(
+    tile(
+      figures.peakKw && energy.total !== null ? round(energy.total / figures.peakKw, 2) : null,
+      'kWh/kW',
+      T('Yield', 'Rendement'),
+      'award',
+    ),
   );
+  return tiles;
+}
+
+/**
+ * Content of the site widget.
+ * @param {object} site
+ * @param {ReturnType<typeof siteSelection>} selection
+ * @param {{ now: number, config: object, title: string|object|null, threshold: number,
+ *   showChart: boolean, view?: { period: string, offset: number } }} options
+ */
+export function siteContent(
+  site,
+  selection,
+  { now, config, title, threshold, showChart, view = { period: 'day', offset: 0 } },
+) {
+  const timeZone = config.timezone;
+  const { boxes } = selection;
+  const figures = siteFigures(boxes, now, timeZone);
+  const firstMonth = firstMonthOf(boxes);
+  const window = windowOf(view.period, view.offset, now, timeZone, {
+    firstYear: firstMonth?.slice(0, 4),
+  });
+  const live = window.current && window.kind === 'curve';
+  const energy = windowEnergy(site.store, boxes, window, now, timeZone);
+
+  const components = headingOf(title);
+  const chart = showChart ? siteChart(site, selection, window, now, timeZone) : null;
+  if (chart) {
+    components.push(chart);
+  }
 
   const rows = [];
+  if (!chart) {
+    // The period shown, when no chart title carries it.
+    const label = labelText(window.label);
+    rows.push({
+      label: T('Period', 'Période'),
+      icon: 'calendar',
+      value: T(label.en, label.fr),
+      color: WIDGET_COLORS.NEUTRAL,
+    });
+  }
   if (selection.layout === LAYOUTS.THREE_PHASE) {
-    rows.push(...phaseRows(selection.phases, now, timeZone));
-    const balance = phaseBalance(selection.phases, now, timeZone, threshold);
-    if (balance) {
-      rows.push(balanceRow(balance));
+    if (live) {
+      rows.push(...livePhaseRows(selection.phases, now, timeZone));
+      const balance = phaseBalance(selection.phases, now, timeZone, threshold);
+      if (balance) {
+        rows.push(balanceRow(balance));
+      }
+    } else {
+      rows.push(...periodPhaseRows(site, selection.phases, window, now, timeZone, energy.total));
     }
   }
-  rows.push({
-    label: T('Boxes · peak power', 'Box · puissance crête'),
-    icon: 'grid',
-    value: `${figures.reporting}/${figures.boxes} · ${figures.peakKw ? `${round(figures.peakKw, 2)} kWc` : UNKNOWN}`,
-    color:
-      figures.reporting === figures.boxes
-        ? WIDGET_COLORS.SUCCESS
-        : figures.reporting === 0
-          ? WIDGET_COLORS.DANGER
-          : WIDGET_COLORS.WARNING,
-  });
-  rows.push({
-    label: T('Yield today · yesterday', 'Rendement · hier'),
-    icon: 'award',
-    value: `${figures.yieldToday === null ? UNKNOWN : `${round(figures.yieldToday, 2)} kWh/kWc`} · ${kwhText(figures.yesterdayKwh)}`,
-    color: WIDGET_COLORS.NEUTRAL,
-  });
-  const flagged = underperformers(boxes, now, timeZone, config.underperformance_threshold);
-  const silent = flagged.filter((entry) => entry.reason === 'silent').map((entry) => entry.box);
-  const low = flagged.filter((entry) => entry.reason === 'low_yield').map((entry) => entry.box);
-  if (silent.length > 0) {
+  if (live) {
     rows.push({
-      label: T('Silent boxes', 'Box muettes'),
-      icon: 'wifi-off',
-      value: namesOf(silent),
-      color: WIDGET_COLORS.DANGER,
+      label: T('Boxes · peak power', 'Box · puissance crête'),
+      icon: 'grid',
+      value: `${figures.reporting}/${figures.boxes} · ${figures.peakKw ? `${round(figures.peakKw, 2)} kWc` : UNKNOWN}`,
+      color: reportingColor(figures.reporting, figures.boxes),
     });
-  }
-  if (low.length > 0) {
     rows.push({
-      label: T('Low yield', 'Rendement faible'),
-      icon: 'alert-triangle',
-      value: namesOf(low),
-      color: WIDGET_COLORS.WARNING,
+      label: T('Yield today · yesterday', 'Rendement · hier'),
+      icon: 'award',
+      value: `${figures.yieldToday === null ? UNKNOWN : `${round(figures.yieldToday, 2)} kWh/kWc`} · ${kwhText(figures.yesterdayKwh)}`,
+      color: WIDGET_COLORS.NEUTRAL,
     });
+    const flagged = underperformers(boxes, now, timeZone, config.underperformance_threshold);
+    const silent = flagged.filter((entry) => entry.reason === 'silent').map((entry) => entry.box);
+    const low = flagged.filter((entry) => entry.reason === 'low_yield').map((entry) => entry.box);
+    if (silent.length > 0) {
+      rows.push({
+        label: T('Silent boxes', 'Box muettes'),
+        icon: 'wifi-off',
+        value: namesOf(silent),
+        color: WIDGET_COLORS.DANGER,
+      });
+    }
+    if (low.length > 0) {
+      rows.push({
+        label: T('Low yield', 'Rendement faible'),
+        icon: 'alert-triangle',
+        value: namesOf(low),
+        color: WIDGET_COLORS.WARNING,
+      });
+    }
+  } else if (window.kind !== 'curve') {
+    const best = energy.entries.reduce(
+      (top, entry) => (entry.kwh !== null && entry.kwh > (top?.kwh ?? -1) ? entry : top),
+      null,
+    );
+    if (best) {
+      const label = labelText(entryLabel(window, best.key));
+      rows.push({
+        label: T('Best', 'Meilleur'),
+        icon: 'award',
+        value: T(`${label.en} · ${kwhText(best.kwh)}`, `${label.fr} · ${kwhText(best.kwh)}`),
+        color: WIDGET_COLORS.SUCCESS,
+      });
+    }
   }
   rows.push(...selectionAlerts(selection));
-  components.push({ type: 'status', items: fitRows(rows) });
-  return { ttl_seconds: 60, components };
+  if (rows.length > 0) {
+    components.push({ type: 'status', items: fitRows(rows) });
+  }
+
+  components.push(
+    ...viewButtons(view, SITE_VIEW.periods, hasPrevious(window, { now, firstMonth })),
+  );
+  const tiles = live
+    ? liveTiles(figures)
+    : periodTiles(site, boxes, window, now, timeZone, energy, figures);
+  components.push(...tiles.slice(0, Math.max(0, MAX_COMPONENTS - components.length)));
+  return { ttl_seconds: live ? 60 : 300, components };
+}
+
+function selectionOf(site, settings) {
+  const all = site.snapshots();
+  if (all.length === 0) {
+    return { error: messageContent(site.lastRefreshAt() === null ? NOT_CONNECTED : NO_BOX) };
+  }
+  const selection = siteSelection(all, settings);
+  if (selection.boxes.length === 0) {
+    return {
+      error: messageContent(selection.layout === LAYOUTS.THREE_PHASE ? ASSIGN_PHASES : NO_BOX),
+    };
+  }
+  return { selection };
 }
 
 export const siteWidget = {
-  async get(_gladys, { settings = {}, site }) {
-    const config = site.config();
-    const all = site.snapshots();
-    if (all.length === 0) {
-      return messageContent(site.lastRefreshAt() === null ? NOT_CONNECTED : NO_BOX);
-    }
-    const selection = siteSelection(all, settings);
-    if (selection.boxes.length === 0) {
-      return messageContent(selection.layout === LAYOUTS.THREE_PHASE ? ASSIGN_PHASES : NO_BOX);
+  async get(_gladys, { settings = {}, site, views = sharedViews }) {
+    const { selection, error } = selectionOf(site, settings);
+    if (error) {
+      return error;
     }
     return siteContent(site, selection, {
       now: Date.now(),
-      config,
+      config: site.config(),
       title: titleOf(settings, null),
       threshold: thresholdOf(settings),
       showChart: settings.show_chart !== false,
+      view: views.get(SITE_WIDGET, settings, SITE_VIEW),
     });
+  },
+
+  async action(_gladys, { actionKey, settings = {}, values, site, views = sharedViews }) {
+    const view = views.apply(SITE_WIDGET, settings, SITE_VIEW, actionKey, values);
+    const firstMonth = firstMonthOf(site.snapshots());
+    return viewMessage(
+      windowOf(view.period, view.offset, Date.now(), site.config().timezone, {
+        firstYear: firstMonth?.slice(0, 4),
+      }),
+    );
   },
 };

@@ -59,8 +59,32 @@ export function threePhaseBoxes() {
   ];
 }
 
-export function createFakeBeem({ boxes = [], summaries = {}, token = 'token-1' } = {}) {
-  const state = { boxes, summaries, token, tokens: 0 };
+/**
+ * An intraday payload: `whPerHour` Wh every hour from 08:00 to 17:00 UTC of
+ * each day of [from, to), for each box id.
+ */
+export function intraday(ids, whPerHour = 100) {
+  return ({ from, to }) => ({
+    devices: ids.map((id) => {
+      const measures = [];
+      for (let at = Date.parse(from); at < Date.parse(to); at += 3_600_000) {
+        const hour = new Date(at).getUTCHours();
+        if (hour >= 8 && hour < 18) {
+          measures.push({ startDate: new Date(at).toISOString(), value: whPerHour });
+        }
+      }
+      return { deviceId: id, type: 'beembox', measures };
+    }),
+  });
+}
+
+export function createFakeBeem({
+  boxes = [],
+  summaries = {},
+  token = 'token-1',
+  intraday = null,
+} = {}) {
+  const state = { boxes, summaries, token, tokens: 0, intraday };
   const calls = [];
   const failures = [];
 
@@ -71,10 +95,12 @@ export function createFakeBeem({ boxes = [], summaries = {}, token = 'token-1' }
     });
 
   async function fetchImpl(url, init = {}) {
-    const path = new URL(url).pathname.replace(/^\/beemapp/, '');
+    const parsed = new URL(url);
+    const path = parsed.pathname.replace(/^\/beemapp/, '');
+    const query = Object.fromEntries(parsed.searchParams);
     const body = init.body ? JSON.parse(init.body) : undefined;
     const authorization = init.headers?.Authorization ?? null;
-    calls.push({ method: init.method ?? 'GET', path, body, authorization });
+    calls.push({ method: init.method ?? 'GET', path, query, body, authorization });
     if (failures.length > 0) {
       const failure = failures.shift();
       if (failure === 'network') {
@@ -98,6 +124,9 @@ export function createFakeBeem({ boxes = [], summaries = {}, token = 'token-1' }
     if (path === '/box/summary') {
       const key = `${body.year}-${String(body.month).padStart(2, '0')}`;
       return json(201, state.summaries[key] ?? []);
+    }
+    if (path === '/production/energy/intraday' && state.intraday) {
+      return json(200, state.intraday(query));
     }
     return json(404, { message: 'Not found' });
   }

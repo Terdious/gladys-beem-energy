@@ -23,10 +23,20 @@
 import { createLogger, DEVICE_TRANSPORTS } from '@gladysassistant/integration-sdk';
 
 import { BeemApiError, createBeemClient } from './beem/client.js';
-import { describeBox, rawBoxesOf, readSummary, summariesById } from './beem/boxes.js';
+import { describeBox, intradayDays, rawBoxesOf, readSummary, summariesById } from './beem/boxes.js';
 import { boxIds, boxStates, buildBoxDevice } from './devices/box.js';
 import { hasCredentials } from './config.js';
-import { dayKey, localParts, monthKey, monthKeyOf, parseMonthKey, shiftMonth } from './time.js';
+import { DAY_RETENTION } from './store.js';
+import {
+  dayKey,
+  localParts,
+  monthKey,
+  monthKeyOf,
+  parseMonthKey,
+  shiftDay,
+  shiftMonth,
+  startOfDayKey,
+} from './time.js';
 
 const logger = createLogger({ name: 'site' });
 
@@ -34,6 +44,8 @@ export const TOPOLOGY_REFRESH_MS = 60 * 60 * 1000;
 export const STORE_SAVE_INTERVAL_MS = 5 * 60 * 1000;
 export const STATE_HEARTBEAT_MS = 30 * 60 * 1000;
 export const HISTORY_REQUEST_SPACING_MS = 3000;
+// Days of production per intraday request (the Beem application's own pace).
+export const DAYS_PER_REQUEST = 7;
 // The backfill stops after this many months without any box: the account
 // did not exist yet.
 const EMPTY_MONTHS_BEFORE_STOP = 2;
@@ -101,6 +113,8 @@ export function createSite({
   let refreshInFlight = null;
   let backfillInFlight = null;
   const listeners = new Set();
+  // What the daily backfill met: shown by the diagnostic action.
+  const dayHistory = { requests: 0, unmatched: [], error: null };
 
   async function reportStatus(error) {
     const key = error ? `error:${error}` : 'ok';
@@ -235,10 +249,7 @@ export function createSite({
     }
   }
 
-  async function doBackfill() {
-    if (!config || !hasCredentials(config) || config.history_months === 0) {
-      return 0;
-    }
+  async function backfillMonths() {
     const current = parseMonthKey(monthKey(now(), config.timezone));
     let fetched = 0;
     let empty = 0;
@@ -274,14 +285,86 @@ export function createSite({
         break;
       }
     }
-    if (fetched > 0) {
-      logger.info(`Production history: ${fetched} month(s) fetched`);
+    return fetched;
+  }
+
+  /**
+   * The daily totals of the past days, from the hourly production of the
+   * Beem application: 7 days per request, from yesterday back, each period
+   * once. Best effort: a payload whose devices match no box stops it (the
+   * diagnostic shows its keys), an error retries at the next start.
+   */
+  async function backfillDays() {
+    const timeZone = config.timezone;
+    const today = dayKey(now(), timeZone);
+    const maxDays = Math.min(DAY_RETENTION, config.history_months * 31);
+    const dayOf = (at) => dayKey(at, timeZone);
+    let fetched = 0;
+    let empty = 0;
+    for (let back = DAYS_PER_REQUEST; back <= maxDays; back += DAYS_PER_REQUEST) {
+      const first = shiftDay(today, -back);
+      if (store.areDaysFetched(first)) {
+        empty = 0;
+        continue;
+      }
+      if (fetched > 0) {
+        await sleep(HISTORY_REQUEST_SPACING_MS);
+      }
+      let payload;
+      try {
+        payload = await client.getProductionIntraday({
+          from: new Date(startOfDayKey(first, timeZone)).toISOString(),
+          to: new Date(startOfDayKey(shiftDay(first, DAYS_PER_REQUEST), timeZone)).toISOString(),
+        });
+      } catch (err) {
+        dayHistory.error = err.message;
+        logger.warn(`Daily history from ${first} not fetched (${err.message})`);
+        break;
+      }
+      fetched += 1;
+      const { days, unmatched } = intradayDays(payload, boxes, dayOf);
+      if (days.size === 0 && unmatched.length > 0) {
+        dayHistory.unmatched = [...new Set(unmatched)];
+        logger.warn(
+          `Daily history: no device of the intraday production matches a box (keys: ${dayHistory.unmatched.join(' | ')})`,
+        );
+        break;
+      }
+      let any = false;
+      for (const [id, totals] of days) {
+        for (const [key, wh] of totals) {
+          // Only the days of the period: the edges of the request can carry
+          // an hour of the day before or after.
+          if (key >= first && key < shiftDay(first, DAYS_PER_REQUEST)) {
+            store.setDay(id, key, Math.round(wh));
+            any = any || wh > 0;
+          }
+        }
+      }
+      store.markDaysFetched(first);
+      empty = any ? 0 : empty + 1;
+      if (empty >= EMPTY_MONTHS_BEFORE_STOP) {
+        break;
+      }
+    }
+    dayHistory.requests += fetched;
+    return fetched;
+  }
+
+  async function doBackfill() {
+    if (!config || !hasCredentials(config) || config.history_months === 0) {
+      return 0;
+    }
+    const months = await backfillMonths();
+    const days = boxes.length > 0 ? await backfillDays() : 0;
+    if (months + days > 0) {
+      logger.info(`Production history: ${months} month(s), ${days} week(s) of days fetched`);
       await store.save();
       for (const listener of listeners) {
         await Promise.resolve(listener()).catch(() => {});
       }
     }
-    return fetched;
+    return months;
   }
 
   return {
@@ -334,6 +417,7 @@ export function createSite({
     config: () => config,
     lastRefreshAt: () => lastRefreshAt,
     lastError: () => lastError,
+    dayHistory: () => ({ ...dayHistory }),
 
     /**
      * One snapshot per box, the only shape the widgets, scenes and alerts

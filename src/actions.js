@@ -86,6 +86,26 @@ export const ACTIONS = {
     if (lines.en.length === 0) {
       return STATUS_MESSAGES.no_box;
     }
+    // The daily history comes from an endpoint of the Beem application whose
+    // format is not documented: what it gave, to check it on a real account.
+    const history = site.dayHistory();
+    const days = site
+      .snapshots()
+      .map((box) => Object.keys(box.history.days).length)
+      .join('/');
+    if (history.unmatched.length > 0) {
+      const keys = history.unmatched.join(' | ');
+      lines.en.push(`Daily history: no box matched (device keys: ${keys}).`);
+      lines.fr.push(`Historique journalier : aucune box reconnue (clés des appareils : ${keys}).`);
+    } else if (history.error) {
+      lines.en.push(`Daily history: ${days} day(s) per box, last error: ${history.error}.`);
+      lines.fr.push(
+        `Historique journalier : ${days} jour(s) par box, dernière erreur : ${history.error}.`,
+      );
+    } else {
+      lines.en.push(`Daily history: ${days} day(s) per box.`);
+      lines.fr.push(`Historique journalier : ${days} jour(s) par box.`);
+    }
     return { en: lines.en.join('\n'), fr: lines.fr.join('\n') };
   },
 
