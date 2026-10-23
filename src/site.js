@@ -341,7 +341,9 @@ export function createSite({
       if (produced.length > 0 && shiftDay(first, DAYS_PER_REQUEST - 1).slice(0, 7) < produced[0]) {
         break;
       }
-      if (store.areDaysFetched(first)) {
+      // `h:` marks the weeks fetched with their hours (1.3.0); the weeks
+      // fetched before are asked once more for their curves.
+      if (store.areDaysFetched(`h:${first}`)) {
         empty = 0;
         continue;
       }
@@ -362,7 +364,7 @@ export function createSite({
         break;
       }
       fetched += 1;
-      const { days, unmatched } = intradayDays(payload, boxes, dayOf);
+      const { days, hours, unmatched } = intradayDays(payload, boxes, dayOf);
       dayHistory.shape = describeShape(payload);
       if (days.size === 0 && unmatched.length > 0) {
         dayHistory.unmatched = [...new Set(unmatched)];
@@ -382,9 +384,12 @@ export function createSite({
           }
         }
       }
+      for (const [id, hourly] of hours) {
+        store.setHours(id, hourly);
+      }
       if (any) {
         dayHistory.backfilled += 1;
-        store.markDaysFetched(first);
+        store.markDaysFetched(`h:${first}`);
       } else {
         // Nothing usable: asked again at the next start (an answer the
         // parsing does not read yet must not be skipped forever).

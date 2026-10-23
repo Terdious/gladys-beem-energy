@@ -56,6 +56,10 @@ function emptyBox() {
     days: {},
     months: {},
     samples: [],
+    // Hourly production backfilled from the Beem application: hour start
+    // (ms, as a string key) -> Wh, the curves of the days before the
+    // 5-minute samples. Hours without production are not kept.
+    hours: {},
   };
 }
 
@@ -82,6 +86,7 @@ function loadBox(raw) {
   }
   box.days = sanitizeEntries(raw?.days);
   box.months = sanitizeEntries(raw?.months);
+  box.hours = sanitizeEntries(raw?.hours);
   box.samples = Array.isArray(raw?.samples)
     ? raw.samples.filter(
         (sample) =>
@@ -241,6 +246,45 @@ export function createStore({ dir } = {}) {
      * Store the total of a past day of a box (history from the cloud). A day
      * the integration saw live keeps its live total: the summary is exact.
      */
+    /**
+     * Store the hourly production of a box (history from the cloud), the
+     * hours older than DAY_RETENTION days before the newest one dropped.
+     * @param {string} id
+     * @param {Map<number, number>} hours hour start (ms) -> Wh
+     */
+    setHours(id, hours) {
+      const box = boxState(id);
+      for (const [at, wh] of hours) {
+        if (isFiniteNumber(at) && isFiniteNumber(wh) && wh > 0) {
+          box.hours[String(at)] = Math.round(wh);
+        }
+      }
+      const keys = Object.keys(box.hours).map(Number);
+      const oldest = Math.max(...keys) - DAY_RETENTION * 24 * 60 * 60 * 1000;
+      for (const at of keys) {
+        if (at < oldest) {
+          delete box.hours[String(at)];
+        }
+      }
+      dirty = true;
+    },
+
+    /** Hourly production of a box in [from, to): [{ t, wh }], oldest first. */
+    hours(id, from = 0, to = Infinity) {
+      return Object.entries(state.boxes[id]?.hours ?? {})
+        .map(([at, wh]) => ({ t: Number(at), wh }))
+        .filter(({ t }) => t >= from && t < to)
+        .sort((a, b) => a.t - b.t);
+    },
+
+    /** The first instant a box has a curve for (hours or samples), null when none. */
+    firstCurveAt(id) {
+      const box = state.boxes[id];
+      const hours = Object.keys(box?.hours ?? {}).map(Number);
+      const candidates = [...hours, ...(box?.samples?.length ? [box.samples[0][0]] : [])];
+      return candidates.length === 0 ? null : Math.min(...candidates);
+    },
+
     setDay(id, key, wh) {
       const box = boxState(id);
       if (isFiniteNumber(wh) && wh >= 0 && box.days[key] === undefined) {

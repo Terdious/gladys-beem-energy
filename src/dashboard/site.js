@@ -25,7 +25,13 @@
 
 import { WIDGET_COLORS } from '@gladysassistant/integration-sdk';
 
-import { firstMonthOf, powerSeries, siteFigures, underperformers } from '../production.js';
+import {
+  curveOf,
+  firstCurveAt,
+  firstMonthOf,
+  siteFigures,
+  underperformers,
+} from '../production.js';
 import {
   T,
   UNKNOWN,
@@ -47,8 +53,8 @@ import {
 } from './common.js';
 import {
   PER_ENTRY,
+  bestLabel,
   entryInstant,
-  entryLabel,
   hasPrevious,
   labelText,
   sharedViews,
@@ -178,11 +184,13 @@ export function siteChart(site, selection, window, now, timeZone) {
       : [{ name: T('Production', 'Production'), boxes: selection.boxes }];
   const label = labelText(window.label);
   if (window.kind === 'curve') {
+    // One resolution for the whole chart: the 5-minute samples, or the hours.
+    const { hourly } = curveOf(site.store, selection.boxes, window.from, window.to);
     const series = groups
       .map((group) => ({
         name: group.name,
-        points: powerSeries(site.store, group.boxes, window.from, window.to)
-          .slice(-MAX_CHART_POINTS)
+        points: curveOf(site.store, group.boxes, window.from, window.to, { hourly })
+          .points.slice(-MAX_CHART_POINTS)
           .map(({ t, w }) => ({ t: new Date(t).toISOString(), v: w })),
       }))
       .filter((entry) => entry.points.length > 0);
@@ -193,7 +201,9 @@ export function siteChart(site, selection, window, now, timeZone) {
       type: 'chart',
       series,
       chart_type: 'area',
-      title: T(`Power · ${label.en}`, `Puissance · ${label.fr}`),
+      title: hourly
+        ? T(`Hourly power · ${label.en}`, `Puissance horaire · ${label.fr}`)
+        : T(`Power · ${label.en}`, `Puissance · ${label.fr}`),
       unit: 'W',
       ...(window.current ? { now_marker: true } : {}),
     };
@@ -241,7 +251,7 @@ function liveTiles(figures) {
 function periodTiles(site, boxes, window, now, timeZone, energy, figures) {
   const tiles = [tile(kwhValue(energy.total), 'kWh', T('Production', 'Production'), 'zap')];
   if (window.kind === 'curve') {
-    const peak = powerSeries(site.store, boxes, window.from, window.to).reduce(
+    const peak = curveOf(site.store, boxes, window.from, window.to).points.reduce(
       (best, sample) => Math.max(best, sample.w),
       0,
     );
@@ -255,12 +265,19 @@ function periodTiles(site, boxes, window, now, timeZone, energy, figures) {
       complete.length > 0
         ? complete.reduce((total, entry) => total + entry.kwh, 0) / complete.length
         : null;
-    tiles.push(tile(kwhValue(average), 'kWh', PER_ENTRY[window.kind], 'activity'));
     const best = energy.entries.reduce(
       (top, entry) => (entry.kwh !== null && entry.kwh > (top?.kwh ?? -1) ? entry : top),
       null,
     );
-    tiles.push(tile(kwhValue(best?.kwh ?? null), 'kWh', T('Best', 'Meilleur'), 'award'));
+    tiles.push(
+      tile(
+        kwhValue(best?.kwh ?? null),
+        'kWh',
+        best ? bestLabel(window, best.key) : T('Best', 'Meilleur'),
+        'award',
+      ),
+    );
+    tiles.push(tile(kwhValue(average), 'kWh', PER_ENTRY[window.kind], 'activity'));
   }
   tiles.push(
     tile(
@@ -355,20 +372,6 @@ export function siteContent(
         color: WIDGET_COLORS.WARNING,
       });
     }
-  } else if (window.kind !== 'curve') {
-    const best = energy.entries.reduce(
-      (top, entry) => (entry.kwh !== null && entry.kwh > (top?.kwh ?? -1) ? entry : top),
-      null,
-    );
-    if (best) {
-      const label = labelText(entryLabel(window, best.key));
-      rows.push({
-        label: T('Best', 'Meilleur'),
-        icon: 'award',
-        value: T(`${label.en} · ${kwhText(best.kwh)}`, `${label.fr} · ${kwhText(best.kwh)}`),
-        color: WIDGET_COLORS.SUCCESS,
-      });
-    }
   }
   rows.push(...selectionAlerts(selection));
   if (rows.length > 0) {
@@ -376,7 +379,11 @@ export function siteContent(
   }
 
   components.push(
-    ...viewButtons(view, SITE_VIEW.periods, hasPrevious(window, { now, firstMonth })),
+    ...viewButtons(
+      view,
+      SITE_VIEW.periods,
+      hasPrevious(window, { now, firstMonth, firstCurve: firstCurveAt(site.store, boxes) }),
+    ),
   );
   const tiles = live
     ? liveTiles(figures)
@@ -416,12 +423,17 @@ export const siteWidget = {
   },
 
   async action(_gladys, { actionKey, settings = {}, values, site, views = sharedViews }) {
-    const view = views.apply(SITE_WIDGET, settings, SITE_VIEW, actionKey, values);
+    const now = Date.now();
+    const view = views.apply(SITE_WIDGET, settings, SITE_VIEW, actionKey, values, {
+      now,
+      timeZone: site.config().timezone,
+    });
     const firstMonth = firstMonthOf(site.snapshots());
     return viewMessage(
-      windowOf(view.period, view.offset, Date.now(), site.config().timezone, {
+      windowOf(view.period, view.offset, now, site.config().timezone, {
         firstYear: firstMonth?.slice(0, 4),
       }),
+      view,
     );
   },
 };

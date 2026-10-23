@@ -237,6 +237,9 @@ test('the daily history is backfilled from the hourly production, each week once
   assert.equal(intradayCalls[0].query.to, '2026-10-19T00:00:00+02:00');
   const { days } = site.store.history('101');
   assert.equal(days['2026-10-18'], 1000, '10 hours of 100 Wh');
+  const hours = site.store.hours('101', Date.parse('2026-10-18T00:00:00.000Z'));
+  assert.equal(hours[0].t, Date.parse('2026-10-18T08:00:00.000Z'));
+  assert.equal(hours[0].wh, 100);
   assert.equal(days['2026-10-19'], 1500, 'the live day keeps the summary total');
   assert.equal(Object.keys(days).length, 29);
 
@@ -324,4 +327,23 @@ test('the weeks before the first month of production are not asked', async () =>
   await site.backfillHistory();
   // October only: the weeks from the 12th, 5th and 28 Sep (it ends in October).
   assert.equal(beem.callsTo('/production/energy/intraday').length, 3);
+});
+
+test('the weeks fetched by 1.2 are asked once more for their hours', async () => {
+  const { site, beem, store } = await setupSite({
+    at: NOON,
+    boxes: threePhaseBoxes().slice(0, 1),
+    summaries: {
+      '2026-10': [summary({ boxId: 101, month: 40000, at: NOON })],
+      '2026-09': [summary({ boxId: 101, month: 90000, at: NOON })],
+    },
+    config: { history_months: 1 },
+  });
+  // A 1.2 mark: days only.
+  store.markDaysFetched('2026-10-12');
+  beem.state.intraday = intraday([101], 100);
+  await site.refresh();
+  await site.backfillHistory();
+  assert.equal(beem.callsTo('/production/energy/intraday').length, 4);
+  assert.ok(store.areDaysFetched('h:2026-10-12'));
 });
