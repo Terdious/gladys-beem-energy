@@ -10,6 +10,30 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- **Go to a date**: the Period form of the widgets has a date field (`05/09/2025`,
+  `09/2025`, `Sept 2025`, `2025`…; the core offers no date picker in a widget
+  form); Previous / Next keep stepping from there
+  ([#9](https://github.com/Terdious/gladys-beem-energy/issues/9)).
+- **Beem box widget**: the same periods and navigation as the installation (12
+  hours, day, week, month, year), the curve or the production bars of the box
+  against the expected ones (the median yield of the other boxes), its
+  production, peak power or best day, yield and place against the others
+  ([#9](https://github.com/Terdious/gladys-beem-energy/issues/9)).
+- **Hourly curves of the past days**: the hourly production backfilled from the
+  Beem application is kept per box (400 days) and drawn ("Hourly power") on the
+  days before the 5-minute samples; the weeks already backfilled are asked once
+  more for their hours
+  ([#9](https://github.com/Terdious/gladys-beem-energy/issues/9)).
+
+### Changed
+
+- The **Best** tile names its day, month or year (`Meilleur · vendredi 02`) and
+  replaces the status row; the history tiles go production, best, vs one year
+  before, then the average (a status row when its tile does not fit, e.g. on a
+  past month) ([#9](https://github.com/Terdious/gladys-beem-energy/issues/9)).
+
 ## [1.2.2] - 2026-10-23
 
 ### Fixed

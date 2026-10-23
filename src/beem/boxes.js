@@ -172,7 +172,8 @@ export function signalQuality(dbm) {
  * @param {object} payload
  * @param {Array<{ id: string, serialNumber: string|null }>} boxes
  * @param {(at: number) => string} dayOf instant -> `YYYY-MM-DD`
- * @returns {{ days: Map<string, Map<string, number>>, unmatched: Array<string> }}
+ * @returns {{ days: Map<string, Map<string, number>>, hours: Map<string, Map<number, number>>,
+ *   unmatched: Array<string> }} hours: hour start (ms) -> Wh
  */
 export function intradayDays(payload, boxes, dayOf) {
   const list = Array.isArray(payload)
@@ -185,6 +186,7 @@ export function intradayDays(payload, boxes, dayOf) {
     }
   }
   const days = new Map();
+  const hours = new Map();
   const unmatched = [];
   for (const device of Array.isArray(list) ? list : []) {
     const candidates = [
@@ -206,6 +208,7 @@ export function intradayDays(payload, boxes, dayOf) {
       continue;
     }
     const totals = days.get(id) ?? new Map();
+    const hourly = hours.get(id) ?? new Map();
     for (const measure of device.measures ?? device.data ?? []) {
       const at = toTimestamp(measure?.startDate ?? measure?.date ?? measure?.start);
       const wh = firstNumber(measure, ['value', 'energy', 'wh']);
@@ -214,10 +217,13 @@ export function intradayDays(payload, boxes, dayOf) {
       }
       const key = dayOf(at);
       totals.set(key, (totals.get(key) ?? 0) + wh);
+      const hour = Math.floor(at / 3_600_000) * 3_600_000;
+      hourly.set(hour, (hourly.get(hour) ?? 0) + wh);
     }
     days.set(id, totals);
+    hours.set(id, hourly);
   }
-  return { days, unmatched };
+  return { days, hours, unmatched };
 }
 
 /**

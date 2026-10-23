@@ -15,11 +15,11 @@
 // -----------------------------------------------------------------------------
 
 import {
+  curveEnergy,
+  curveOf,
   energyOfDays,
   energyOfMonths,
   energyOfYears,
-  powerSeries,
-  POWER_BUCKET_MS,
 } from '../production.js';
 import { SAMPLE_RETENTION_MS } from '../store.js';
 import {
@@ -154,18 +154,20 @@ export function windowOf(period, offset, now, timeZone, { firstYear } = {}) {
 }
 
 /**
- * Whether the period before a window still holds data: the 5-minute curves
- * are kept SAMPLE_RETENTION_MS, the days and months back to the first month
- * with production.
+ * Whether the period before a window still holds data: the curves back to
+ * the 5-minute samples kept SAMPLE_RETENTION_MS or the first backfilled hour,
+ * the days and months back to the first month with production.
  * @param {ReturnType<typeof windowOf>} window
  * @param {{ now: number, firstMonth: string|null }} bounds
  */
-export function hasPrevious(window, { now, firstMonth }) {
+export function hasPrevious(window, { now, firstMonth, firstCurve = null }) {
   if (window.kind === 'years') {
     return false;
   }
   if (window.kind === 'curve') {
-    return window.from > now - SAMPLE_RETENTION_MS;
+    // The 5-minute samples, or the hours backfilled before them.
+    const oldest = Math.min(now - SAMPLE_RETENTION_MS, firstCurve ?? Infinity);
+    return window.from > oldest;
   }
   if (firstMonth === null) {
     return false;
@@ -204,11 +206,14 @@ export function createViews({ maxInstances = 200 } = {}) {
     },
 
     /**
-     * Apply a tap on a view button.
-     * @returns {{ period: string, offset: number }} the new view
+     * Apply a tap on a view button. The period form may carry a `date`
+     * (src/dashboard/period.js parseDate): the view goes to the period
+     * holding it; an unreadable one keeps the current period.
+     * @returns {{ period: string, offset: number, invalidDate?: true }} the new view
      */
-    apply(widgetKey, settings, spec, actionKey, values = {}) {
+    apply(widgetKey, settings, spec, actionKey, values = {}, { now = Date.now(), timeZone } = {}) {
       const view = this.get(widgetKey, settings, spec);
+      let invalidDate = false;
       if (actionKey === PERIOD_ACTION) {
         const chosen = values?.period;
         view.period = spec.periods.includes(chosen)
@@ -216,6 +221,15 @@ export function createViews({ maxInstances = 200 } = {}) {
           : // No form on this core: the tap cycles the periods.
             spec.periods[(spec.periods.indexOf(view.period) + 1) % spec.periods.length];
         view.offset = 0;
+        const text = typeof values?.date === 'string' ? values.date.trim() : '';
+        if (text !== '' && timeZone) {
+          const date = parseDate(text, now, timeZone);
+          if (date) {
+            view.offset = offsetForDate(view.period, date, now, timeZone);
+          } else {
+            invalidDate = true;
+          }
+        }
       } else if (actionKey === PREVIOUS_ACTION) {
         view.offset -= 1;
       } else if (actionKey === NEXT_ACTION) {
@@ -229,7 +243,7 @@ export function createViews({ maxInstances = 200 } = {}) {
       while (views.size > maxInstances) {
         views.delete(views.keys().next().value);
       }
-      return { ...view };
+      return invalidDate ? { ...view, invalidDate } : { ...view };
     },
   };
 }
@@ -260,6 +274,18 @@ export function viewButtons(view, periods, canGoBack) {
             display: 'radio',
             options: periods.map((key) => ({ value: key, label: PERIODS[key].label })),
           },
+          {
+            // The core offers no date picker in a widget form: a text field
+            // read by parseDate.
+            key: 'date',
+            type: 'string',
+            label: T('Go to the date (optional)', 'Aller à la date (facultatif)'),
+            description: T(
+              'Empty: the current period. E.g. 05/09/2025, 09/2025, Sept 2025, 2025.',
+              'Vide : la période en cours. Ex. 05/09/2025, 09/2025, sept. 2025, 2025.',
+            ),
+            placeholder: T('e.g. 05/09/2025', 'ex. 05/09/2025'),
+          },
         ],
       },
     },
@@ -285,11 +311,117 @@ export function viewButtons(view, periods, canGoBack) {
   return buttons;
 }
 
-/** The toast after a tap: the period now shown. */
-export const viewMessage = (window) => {
+/** The toast after a tap: the period now shown, or the date not read. */
+export const viewMessage = (window, { invalidDate = false } = {}) => {
   const label = typeof window.label === 'string' ? T(window.label, window.label) : window.label;
-  return T(`Showing ${label.en}`, `Affichage : ${label.fr}`);
+  return invalidDate
+    ? T(
+        `Date not understood (e.g. 05/09/2025, 09/2025, 2025): showing ${label.en}`,
+        `Date non comprise (ex. 05/09/2025, 09/2025, 2025) : affichage ${label.fr}`,
+      )
+    : T(`Showing ${label.en}`, `Affichage : ${label.fr}`);
 };
+
+// Month names and abbreviations, English and French, without accents.
+const MONTH_NAMES = [
+  ['jan', 'janv', 'january', 'janvier'],
+  ['feb', 'fev', 'fevr', 'february', 'fevrier'],
+  ['mar', 'march', 'mars'],
+  ['apr', 'avr', 'april', 'avril'],
+  ['may', 'mai'],
+  ['jun', 'june', 'juin'],
+  ['jul', 'juil', 'july', 'juillet'],
+  ['aug', 'aou', 'august', 'aout'],
+  ['sep', 'sept', 'september', 'septembre'],
+  ['oct', 'october', 'octobre'],
+  ['nov', 'november', 'novembre'],
+  ['dec', 'december', 'decembre'],
+];
+
+const plain = (text) =>
+  text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\./g, '')
+    .trim();
+
+/**
+ * Read a date typed in the period form: `05/09/2025`, `5-9-25`, `05/09`
+ * (the last such day), `09/2025`, `2025-09-05`, `2025-09`, `sept. 2025`,
+ * `september 2025`, `2025`. Null when not understood.
+ * @returns {{ year: number, month?: number, day?: number }|null}
+ */
+export function parseDate(text, now, timeZone) {
+  const value = plain(String(text ?? ''));
+  const today = localParts(now, timeZone);
+  const fullYear = (y) => (y < 100 ? 2000 + y : y);
+  const valid = ({ year, month, day }) =>
+    year >= 2000 &&
+    year <= 2100 &&
+    (month === undefined || (month >= 1 && month <= 12)) &&
+    (day === undefined || (day >= 1 && day <= daysInMonth({ year, month })));
+  let date = null;
+  let match;
+  if ((match = value.match(/^(\d{4})-(\d{1,2})(?:-(\d{1,2}))?$/))) {
+    date = { year: +match[1], month: +match[2], ...(match[3] ? { day: +match[3] } : {}) };
+  } else if ((match = value.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2}|\d{4})$/))) {
+    date = { year: fullYear(+match[3]), month: +match[2], day: +match[1] };
+  } else if ((match = value.match(/^(\d{1,2})[/.-](\d{4})$/))) {
+    date = { year: +match[2], month: +match[1] };
+  } else if ((match = value.match(/^(\d{1,2})[/.-](\d{1,2})$/))) {
+    // Day and month: this year, or last year when still to come.
+    const later = +match[2] > today.month || (+match[2] === today.month && +match[1] > today.day);
+    date = { year: today.year - (later ? 1 : 0), month: +match[2], day: +match[1] };
+  } else if ((match = value.match(/^(\d{4})$/))) {
+    date = { year: +match[1] };
+  } else if ((match = value.match(/^(?:(\d{1,2})\s+)?([a-z]+)\s*(\d{4})?$/))) {
+    const month = MONTH_NAMES.findIndex((names) => names.includes(match[2])) + 1;
+    if (month > 0) {
+      let year = match[3] ? +match[3] : today.year;
+      if (!match[3] && month > today.month) {
+        year -= 1;
+      }
+      date = { year, month, ...(match[1] ? { day: +match[1] } : {}) };
+    }
+  }
+  return date && valid(date) ? date : null;
+}
+
+const daysSince = (from, to) =>
+  Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
+
+/**
+ * The offset of the period of `period` holding a date (0 or less: a date to
+ * come is the current period). A date without its day (or month) is the
+ * first one.
+ */
+export function offsetForDate(period, date, now, timeZone) {
+  const today = localParts(now, timeZone);
+  const month = date.month ?? 1;
+  const key = `${date.year}-${String(month).padStart(2, '0')}-${String(date.day ?? 1).padStart(2, '0')}`;
+  const todayKey = dayKey(now, timeZone);
+  if (key > todayKey) {
+    return 0;
+  }
+  switch (period) {
+    case 'hours_12': {
+      // The 12 hours holding noon of that day.
+      const noon = startOfDayKey(key, timeZone) + HOURS_12_MS;
+      return noon >= now ? 0 : -Math.floor((now - noon) / HOURS_12_MS);
+    }
+    case 'day':
+      return -daysSince(key, todayKey);
+    case 'week':
+      return -Math.floor(daysSince(key, todayKey) / 7);
+    case 'month':
+      return -((today.year - date.year) * 12 + (today.month - month));
+    case 'year':
+      return -(today.year - date.year);
+    default:
+      return 0;
+  }
+}
 
 /** The views of this process, shared by the widgets. */
 export const sharedViews = createViews();
@@ -306,11 +438,8 @@ export const yearInstant = (year) => `${year}-07-01T12:00:00.000Z`;
 export function windowEnergy(store, boxes, window, now, timeZone) {
   let entries;
   if (window.period === 'hours_12') {
-    const wh = powerSeries(store, boxes, window.from, window.to).reduce(
-      (total, { w }) => total + (w * POWER_BUCKET_MS) / 3_600_000,
-      0,
-    );
-    entries = [{ key: 'hours_12', kwh: wh > 0 ? wh / 1000 : null }];
+    const kwh = curveEnergy(curveOf(store, boxes, window.from, window.to));
+    entries = [{ key: 'hours_12', kwh: kwh > 0 ? kwh : null }];
   } else if (window.days) {
     entries = energyOfDays(boxes, window.days, now, timeZone);
   } else if (window.months) {
@@ -351,6 +480,28 @@ export function entryLabel(window, key) {
     return T(key, key);
   }
   return dayTitle(key);
+}
+
+const WEEKDAYS_LONG = {
+  en: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+  fr: ['dimanche', 'lundi', 'mardi', 'mercredi', 'jeudi', 'vendredi', 'samedi'],
+};
+
+/**
+ * The label of a "best" tile, naming its entry (≤ 24 characters): `Best ·
+ * Friday 02`, `Meilleur · août 2026`, `Meilleur · 2025`.
+ */
+export function bestLabel(window, key) {
+  if (window.kind === 'months' || window.kind === 'years') {
+    const label = labelText(entryLabel(window, key));
+    return T(`Best · ${label.en}`, `Meilleur · ${label.fr}`);
+  }
+  const weekday = new Date(`${key}T12:00:00.000Z`).getUTCDay();
+  const day = key.slice(8, 10);
+  return T(
+    `Best · ${WEEKDAYS_LONG.en[weekday]} ${day}`,
+    `Meilleur · ${WEEKDAYS_LONG.fr[weekday]} ${day}`,
+  );
 }
 
 /** Per-entry unit of a window, for "average per ...". */

@@ -5,7 +5,7 @@ import { validateWidgetContent } from '@gladysassistant/integration-sdk';
 
 import { boxContent, compassOf, cutsRow } from '../src/dashboard/box.js';
 import { siteSelection } from '../src/dashboard/common.js';
-import { historyContent, yearOverYear } from '../src/dashboard/history.js';
+import { historyContent, historyView, yearOverYear } from '../src/dashboard/history.js';
 import { createViews, windowOf } from '../src/dashboard/period.js';
 import { savingsContent } from '../src/dashboard/savings.js';
 import { phaseBalance, siteContent } from '../src/dashboard/site.js';
@@ -324,8 +324,9 @@ test('the site widget: live tiles on the current day, period tiles on a week', a
       .components.filter((component) => component.type === 'value')
       .map((component) => text(component.label));
   assert.deepEqual(labelsOf({ period: 'day', offset: 0 }).slice(0, 2), ['Power', 'Today']);
-  assert.deepEqual(labelsOf({ period: 'week', offset: 0 }).slice(0, 2), [
+  assert.deepEqual(labelsOf({ period: 'week', offset: 0 }).slice(0, 3), [
     'Production',
+    'Best · Monday 19',
     'Per day (average)',
   ]);
 });
@@ -372,4 +373,165 @@ test('the savings widget fits the core budget for every period', async () => {
       assert.deepEqual(validateWidgetContent(content), [], `${period} ${offset}`);
     }
   }
+});
+
+test('history: on a past month the last-year tile stays, the average moves to a row', async () => {
+  const { site } = await producingSite();
+  // October 2025 known per day: a year-over-year comparison on Sep... use
+  // the months: September 2026 against September 2025.
+  for (const box of threePhaseBoxes()) {
+    site.store.setMonth(String(box.id), '2025-09', 80000);
+    site.store.setDay(String(box.id), '2026-09-05', 3000);
+  }
+  const content = historyContent(site, site.snapshots(), {
+    now: NOON,
+    config: site.config(),
+    title: null,
+    view: { period: 'month', offset: -1 },
+  });
+  assert.deepEqual(validateWidgetContent(content), []);
+  const tiles = content.components
+    .filter((component) => component.type === 'value')
+    .map((component) => text(component.label));
+  assert.deepEqual(tiles, ['Production', 'Best · Saturday 05', 'Vs one year before']);
+  const rows = statusOf(content).items.map((item) => text(item.label));
+  assert.ok(rows.includes('Per day (average)'));
+  assert.ok(!rows.includes('Best'), 'the tile names the best day');
+});
+
+test('the site widget draws the hourly curve of a day before the samples', async () => {
+  const { site } = await producingSite();
+  const day = Date.parse('2026-10-15T00:00:00.000Z');
+  for (const box of threePhaseBoxes()) {
+    site.store.setHours(
+      String(box.id),
+      new Map(Array.from({ length: 10 }, (_, i) => [day + (6 + i) * 3_600_000, 200])),
+    );
+  }
+  const content = siteContent(site, siteSelection(site.snapshots(), {}), {
+    now: NOON,
+    config: site.config(),
+    title: null,
+    threshold: 500,
+    showChart: true,
+    view: { period: 'day', offset: -4 },
+  });
+  assert.deepEqual(validateWidgetContent(content), []);
+  const chart = content.components.find((component) => component.type === 'chart');
+  assert.equal(chart.title.fr, 'Puissance horaire · jeu. 15/10');
+  assert.equal(chart.series[0].points.length, 10);
+  assert.equal(chart.series[0].points[0].v, 1200, 'six boxes at 200 Wh');
+  const buttons = content.components.filter((component) => component.type === 'button');
+  assert.ok(
+    buttons.some((button) => button.action.key === 'previous'),
+    'the hours go back further than the samples',
+  );
+});
+
+test('the period form goes to a typed date, or says it did not understand it', async () => {
+  const { gladys, site } = await producingSite();
+  const views = createViews();
+  const settings = {};
+  const message = await WIDGETS.history.action(gladys, {
+    actionKey: 'period',
+    settings,
+    values: { period: 'month', date: 'sept. 2025' },
+    site,
+    views,
+  });
+  assert.deepEqual(views.get('history', settings, historyView(settings)), {
+    period: 'month',
+    offset: -13,
+  });
+  assert.match(message.fr, /Affichage : sept\. 2025/);
+  const wrong = await WIDGETS.history.action(gladys, {
+    actionKey: 'period',
+    settings,
+    values: { period: 'year', date: 'hier' },
+    site,
+    views,
+  });
+  assert.match(wrong.fr, /Date non comprise/);
+  assert.equal(views.get('history', settings, historyView(settings)).offset, 0);
+});
+
+test('the box widget fits the core budget for every period, live or past', async () => {
+  const { gladys, site } = await producingSite();
+  const day = Date.parse('2026-10-15T00:00:00.000Z');
+  for (const box of threePhaseBoxes()) {
+    site.store.setHours(
+      String(box.id),
+      new Map(Array.from({ length: 10 }, (_, i) => [day + (6 + i) * 3_600_000, box.id * 2])),
+    );
+  }
+  const box = site.snapshots().find((snapshot) => snapshot.id === '201');
+  for (const period of ['hours_12', 'day', 'week', 'month', 'year']) {
+    for (const offset of [0, -1, -4]) {
+      const content = boxContent(gladys, site, box, {
+        now: NOON,
+        config: site.config(),
+        title: 'Beem On L1',
+        view: { period, offset },
+      });
+      assert.deepEqual(validateWidgetContent(content), [], `${period} ${offset}`);
+      assert.ok(content.components.length <= 8);
+      assert.equal(content.components[0].text, 'Beem On L1');
+    }
+  }
+  const past = boxContent(gladys, site, box, {
+    now: NOON,
+    config: site.config(),
+    title: 'B',
+    view: { period: 'day', offset: -4 },
+  });
+  const chart = past.components.find((component) => component.type === 'chart');
+  assert.equal(chart.title.en, 'Hourly power · Thu 15/10');
+  assert.equal(chart.hourly, undefined, 'the internal flag is not sent');
+  assert.deepEqual(
+    chart.series.map((series) => series.name.en),
+    ['This box', 'Expected'],
+  );
+  // Beem On L1 (1000 Wp) at 402 Wh, its peers' median load scaled to it.
+  assert.equal(chart.series[0].points[0].v, 402);
+});
+
+test('the box widget: bars against the expected production on a month', async () => {
+  const { gladys, site } = await producingSite();
+  for (const box of threePhaseBoxes()) {
+    site.store.setDay(String(box.id), '2026-10-10', box.id > 200 ? 4000 : 3600);
+  }
+  const box = site.snapshots().find((snapshot) => snapshot.id === '101');
+  const content = boxContent(gladys, site, box, {
+    now: NOON,
+    config: site.config(),
+    title: 'B',
+    view: { period: 'month', offset: 0 },
+  });
+  const chart = content.components.find((component) => component.type === 'chart');
+  assert.equal(chart.chart_type, 'bar');
+  const tenth = (series) => series.points.find((point) => point.t.startsWith('2026-10-10')).v;
+  assert.equal(tenth(chart.series[0]), 3.6);
+  // Median yield of the peers: 4 kWh/kWp, times 0.9 kWp.
+  assert.equal(tenth(chart.series[1]), 3.6);
+  const labels = content.components
+    .filter((component) => component.type === 'value')
+    .map((component) => text(component.label));
+  assert.equal(labels[1], 'Best · Saturday 10');
+});
+
+test('the box widget period buttons follow the box', async () => {
+  const { gladys, site } = await producingSite();
+  const views = createViews();
+  const settings = { device: boxIds(gladys, '201').device };
+  await WIDGETS.box.action(gladys, {
+    actionKey: 'period',
+    settings,
+    values: { period: 'day', date: '15/10' },
+    site,
+    views,
+  });
+  const content = await WIDGETS.box.get(gladys, { settings, site, views });
+  assert.deepEqual(validateWidgetContent(content), []);
+  const buttons = content.components.filter((component) => component.type === 'button');
+  assert.ok(buttons.some((button) => button.action.key === 'next'));
 });

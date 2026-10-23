@@ -239,25 +239,32 @@ export function underperformers(boxes, now, timeZone, threshold) {
  * @param {number} from timestamp (ms)
  * @returns {Array<{ t: number, w: number|null, expected: number|null }>}
  */
-export function comparedSeries(store, box, all, from) {
+export function comparedSeries(store, box, all, from, to = Infinity, { hourly = false } = {}) {
+  // The 5-minute samples, or the hourly production (its Wh is the average
+  // power of the hour, placed mid-hour) for the days before the samples.
+  const pointsOf = (id) =>
+    hourly
+      ? store.hours(id, from, to).map(({ t, wh }) => ({ t: t + HOUR_MS / 2, w: wh }))
+      : store.samples(id, from, to);
   const peers = all.filter((other) => other.id !== box.id && other.peakPowerW > 0);
   const loads = new Map();
   for (const peer of peers) {
-    for (const { t, w } of store.samples(peer.id, from)) {
+    for (const { t, w } of pointsOf(peer.id)) {
       if (!loads.has(t)) {
         loads.set(t, []);
       }
       loads.get(t).push(w / peer.peakPowerW);
     }
   }
-  const own = new Map(store.samples(box.id, from).map(({ t, w }) => [t, w]));
+  const own = new Map(pointsOf(box.id).map(({ t, w }) => [t, w]));
   const instants = [...new Set([...own.keys(), ...loads.keys()])].sort((a, b) => a - b);
   return instants.map((t) => {
     const load = loads.has(t) ? median(loads.get(t)) : null;
     return {
       t,
-      // No sample: the box was absent from the cloud summary.
-      w: own.has(t) ? Math.round(own.get(t)) : null,
+      // No point: the box was absent from the cloud summary (or, hourly,
+      // produced nothing that hour).
+      w: own.has(t) ? Math.round(own.get(t)) : hourly ? 0 : null,
       expected: load === null || !(box.peakPowerW > 0) ? null : Math.round(load * box.peakPowerW),
     };
   });
@@ -271,8 +278,8 @@ export function comparedSeries(store, box, all, from) {
  * ones facing west (the silent alert covers a cut still going on).
  * @returns {{ count: number, lastAt: number|null }}
  */
-export function cutsOf(store, box, all, from) {
-  const series = comparedSeries(store, box, all, from);
+export function cutsOf(store, box, all, from, to = Infinity) {
+  const series = comparedSeries(store, box, all, from, to);
   let count = 0;
   let lastAt = null;
   let runStart = null;
@@ -358,4 +365,51 @@ export function firstMonthOf(boxes) {
       .map(([key]) => key.slice(0, 7)),
   ]);
   return keys.length === 0 ? null : keys.sort()[0];
+}
+
+const HOUR_MS = 60 * 60 * 1000;
+
+/**
+ * The power curve of some boxes over [from, to): the 5-minute samples of the
+ * integration, or the hourly production backfilled from the Beem application
+ * when the window has no sample, or fewer than its hours (the day the
+ * integration was installed). An hourly point is the average power of its
+ * hour (its Wh), placed mid-hour. `hourly` forces one or the other (the
+ * phases of one chart follow the choice made for the whole selection).
+ * @returns {{ points: Array<{ t: number, w: number }>, hourly: boolean, bucketMs: number }}
+ */
+export function curveOf(store, boxes, from, to, { hourly: forced } = {}) {
+  const samples = powerSeries(store, boxes, from, to);
+  const totals = new Map();
+  for (const box of boxes) {
+    for (const { t, wh } of store.hours(box.id, from, to)) {
+      totals.set(t, (totals.get(t) ?? 0) + wh);
+    }
+  }
+  const hourly = [...totals.entries()].sort(([a], [b]) => a - b);
+  const useHours =
+    forced ??
+    (hourly.length > 0 && (samples.length === 0 || samples[0].t > hourly[0][0] + HOUR_MS));
+  if (useHours) {
+    return {
+      points: hourly.map(([t, wh]) => ({ t: t + HOUR_MS / 2, w: Math.round(wh) })),
+      hourly: true,
+      bucketMs: HOUR_MS,
+    };
+  }
+  return { points: samples, hourly: false, bucketMs: POWER_BUCKET_MS };
+}
+
+/** The energy (kWh) of a curve, null when it has no point. */
+export function curveEnergy({ points, bucketMs }) {
+  if (points.length === 0) {
+    return null;
+  }
+  return points.reduce((total, { w }) => total + (w * bucketMs) / HOUR_MS, 0) / 1000;
+}
+
+/** The first instant any of the boxes has a curve for, null when none. */
+export function firstCurveAt(store, boxes) {
+  const instants = boxes.map((box) => store.firstCurveAt(box.id)).filter((at) => at !== null);
+  return instants.length === 0 ? null : Math.min(...instants);
 }

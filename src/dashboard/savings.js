@@ -273,12 +273,17 @@ export const savingsWidget = {
   },
 
   async action(_gladys, { actionKey, settings = {}, values, site, views = sharedViews }) {
-    const view = views.apply(SAVINGS_WIDGET, settings, SAVINGS_VIEW, actionKey, values);
+    const now = Date.now();
+    const view = views.apply(SAVINGS_WIDGET, settings, SAVINGS_VIEW, actionKey, values, {
+      now,
+      timeZone: site.config().timezone,
+    });
     const firstMonth = firstMonthOf(boxesOf(site.snapshots(), settings));
     return viewMessage(
-      windowOf(view.period, view.offset, Date.now(), site.config().timezone, {
+      windowOf(view.period, view.offset, now, site.config().timezone, {
         firstYear: firstMonth?.slice(0, 4),
       }),
+      view,
     );
   },
 };

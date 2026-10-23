@@ -7,10 +7,11 @@
 // from the integration itself and from the hourly history of the Beem cloud
 // fetched at startup; the months from the monthly history of the cloud.
 //
-// Tiles: the production of the period, its average per day / month / year,
-// the best one, and the comparison with the same period one year before.
-// Status: the best day / month / year, the comparison in kWh, and the
-// ranking of the boxes over the period (with their yield per kWp).
+// Tiles, by importance: the production of the period, the best day / month
+// / year with its date, the comparison with the same period one year before,
+// the average per day / month / year (a status row when its tile does not
+// fit). Status: the comparison in kWh, and the ranking of the boxes over the
+// period (with their yield per kWp).
 //
 // Content budget of the core: 8 components, buttons included.
 // -----------------------------------------------------------------------------
@@ -35,8 +36,8 @@ import {
 } from './common.js';
 import {
   PER_ENTRY,
+  bestLabel,
   entryInstant,
-  entryLabel,
   hasPrevious,
   labelText,
   sharedViews,
@@ -159,6 +160,44 @@ export function historyContent(
   const best = known.reduce((top, entry) => (entry.kwh > (top?.kwh ?? -1) ? entry : top), null);
   const comparison = yearOverYear(boxes, window, now, timeZone);
 
+  const buttons = viewButtons(view, periods, hasPrevious(window, { now, firstMonth }));
+  // Tiles by importance; the room is what the heading, the chart, the status
+  // and the buttons leave (8 components). A tile that does not fit with a
+  // `row` gives its figure to the status instead.
+  const candidates = [
+    { tile: tile(kwhValue(energy.total), 'kWh', T('Production', 'Production'), 'layers') },
+    {
+      tile: tile(
+        kwhValue(best?.kwh ?? null),
+        'kWh',
+        best ? bestLabel(window, best.key) : T('Best', 'Meilleur'),
+        'award',
+      ),
+    },
+  ];
+  if (comparison?.percent !== null && comparison?.percent !== undefined) {
+    candidates.push({
+      tile: tile(
+        signed(comparison.percent),
+        null,
+        T('Vs one year before', 'Vs un an plus tôt'),
+        comparison.percent < 0 ? 'trending-down' : 'trending-up',
+      ),
+    });
+  }
+  candidates.push({
+    tile: tile(kwhValue(average), 'kWh', PER_ENTRY[window.kind], 'activity'),
+    row: {
+      label: PER_ENTRY[window.kind],
+      icon: 'activity',
+      value: kwhText(average),
+      color: WIDGET_COLORS.NEUTRAL,
+    },
+  });
+  const room = Math.max(0, MAX_COMPONENTS - components.length - 1 - buttons.length);
+  const shown = candidates.slice(0, room);
+  const moved = candidates.slice(room).filter((candidate) => candidate.row);
+
   const rows = [];
   if (known.length === 0) {
     rows.push({
@@ -166,15 +205,6 @@ export function historyContent(
       icon: 'calendar',
       value: T(`${label.en} · no data`, `${label.fr} · aucune donnée`),
       color: WIDGET_COLORS.NEUTRAL,
-    });
-  }
-  if (best) {
-    const bestLabel = labelText(entryLabel(window, best.key));
-    rows.push({
-      label: T('Best', 'Meilleur'),
-      icon: 'award',
-      value: T(`${bestLabel.en} · ${kwhText(best.kwh)}`, `${bestLabel.fr} · ${kwhText(best.kwh)}`),
-      color: WIDGET_COLORS.SUCCESS,
     });
   }
   if (comparison) {
@@ -191,6 +221,7 @@ export function historyContent(
           : WIDGET_COLORS.SUCCESS,
     });
   }
+  rows.push(...moved.map((candidate) => candidate.row));
   const ranking = boxes
     .map((box) => ({
       box,
@@ -217,24 +248,8 @@ export function historyContent(
     });
   }
   components.push({ type: 'status', items: fitRows(rows) });
-
-  components.push(...viewButtons(view, periods, hasPrevious(window, { now, firstMonth })));
-  const tiles = [
-    tile(kwhValue(energy.total), 'kWh', T('Production', 'Production'), 'layers'),
-    tile(kwhValue(average), 'kWh', PER_ENTRY[window.kind], 'activity'),
-    tile(kwhValue(best?.kwh ?? null), 'kWh', T('Best', 'Meilleur'), 'award'),
-  ];
-  if (comparison?.percent !== null && comparison?.percent !== undefined) {
-    tiles.push(
-      tile(
-        signed(comparison.percent),
-        null,
-        T('Vs one year before', 'Vs un an plus tôt'),
-        comparison.percent < 0 ? 'trending-down' : 'trending-up',
-      ),
-    );
-  }
-  components.push(...tiles.slice(0, Math.max(0, MAX_COMPONENTS - components.length)));
+  components.push(...buttons);
+  components.push(...shown.map((candidate) => candidate.tile));
   return { ttl_seconds: 300, components };
 }
 
@@ -260,12 +275,17 @@ export const historyWidget = {
   },
 
   async action(_gladys, { actionKey, settings = {}, values, site, views = sharedViews }) {
-    const view = views.apply(HISTORY_WIDGET, settings, historyView(settings), actionKey, values);
+    const now = Date.now();
+    const view = views.apply(HISTORY_WIDGET, settings, historyView(settings), actionKey, values, {
+      now,
+      timeZone: site.config().timezone,
+    });
     const firstMonth = firstMonthOf(boxesOf(site.snapshots(), settings));
     return viewMessage(
-      windowOf(view.period, view.offset, Date.now(), site.config().timezone, {
+      windowOf(view.period, view.offset, now, site.config().timezone, {
         firstYear: firstMonth?.slice(0, 4),
       }),
+      view,
     );
   },
 };
