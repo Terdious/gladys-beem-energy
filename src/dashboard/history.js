@@ -1,81 +1,134 @@
 // -----------------------------------------------------------------------------
 // The `history` widget: the production over time, as bars.
 //
-// `period: days`: the last 30 days (the days the integration saw: the cloud
-// gives no daily history, they accumulate from the installation of the
-// integration on). `period: months`: the last 12 or 24 months (the monthly
-// history the cloud gives, fetched at startup).
+// The period is chosen live (src/dashboard/period.js): a month (one bar per
+// day), a year (one bar per month) or all the years (one bar per year), and
+// "Previous" / "Next" step through the past months and years. The days come
+// from the integration itself and from the hourly history of the Beem cloud
+// fetched at startup; the months from the monthly history of the cloud.
 //
-// Tiles: the total and the average of the period, the best day (or month).
-// Status: the current month against the same month of last year, the
-// records, the best box of the period.
+// Tiles: the production of the period, its average per day / month / year,
+// the best one, and the comparison with the same period one year before.
+// Status: the best day / month / year, the comparison in kWh, and the
+// ranking of the boxes over the period (with their yield per kWp).
+//
+// Content budget of the core: 8 components, buttons included.
 // -----------------------------------------------------------------------------
 
 import { WIDGET_COLORS } from '@gladysassistant/integration-sdk';
 
-import { boxFigures, dailySeries, monthlySeries, siteFigures } from '../production.js';
-import { dayKey, monthKey, parseMonthKey, shiftMonth, monthKeyOf } from '../time.js';
+import { energyOfDays, energyOfMonths, firstMonthOf, siteFigures } from '../production.js';
 import {
   T,
   UNKNOWN,
-  clip,
   NO_BOX,
   NOT_CONNECTED,
-  dayInstant,
-  dayLabel,
+  clip,
   fitRows,
+  headingOf,
   kwhText,
   kwhValue,
   messageContent,
-  monthInstant,
-  monthLabel,
   siteSelection,
   tile,
-  headingOf,
   titleOf,
 } from './common.js';
+import {
+  PER_ENTRY,
+  entryInstant,
+  entryLabel,
+  hasPrevious,
+  labelText,
+  sharedViews,
+  viewButtons,
+  viewMessage,
+  windowEnergy,
+  windowOf,
+} from './period.js';
 
 export const HISTORY_WIDGET = 'history';
 
-export const PERIODS = { DAYS: 'days', MONTHS_12: 'months_12', MONTHS_24: 'months_24' };
+const MAX_COMPONENTS = 8;
 
-const best = (series) =>
-  series.reduce(
-    (top, entry) => (entry.kwh !== null && entry.kwh > (top?.kwh ?? -1) ? entry : top),
-    null,
-  );
+// The `period` setting (stored values kept from 1.0) is the default view.
+const DEFAULT_PERIODS = { days: 'month', months_12: 'year', months_24: 'year' };
 
-/** The current month against the same month one year before: `+12 %`. */
-export function yearOverYear(boxes, now, timeZone) {
-  const current = parseMonthKey(monthKey(now, timeZone));
-  const previousKey = monthKeyOf(shiftMonth(current, -12));
-  const figures = siteFigures(boxes, now, timeZone);
-  const previous = boxes
-    .map((box) => box.history.months[previousKey])
-    .filter((wh) => wh !== undefined);
-  if (previous.length === 0 || figures.monthKwh === null) {
+export const historyView = (settings) => ({
+  periods: ['month', 'year', 'all'],
+  defaultPeriod: DEFAULT_PERIODS[settings?.period] ?? 'month',
+});
+
+/**
+ * The production of the period against the same period one year before,
+ * like for like: a month against the same month (a current month against
+ * the same days), a year against the same months (a current year against
+ * its complete months only), each side over what both know. Null when the
+ * year before is unknown, or for all the years.
+ * @returns {{ previousKwh: number, percent: number|null }|null}
+ */
+export function yearOverYear(boxes, window, now, timeZone) {
+  const back = (key) => `${Number(key.slice(0, 4)) - 1}${key.slice(4)}`;
+  let pairs;
+  if (window.period === 'month' && window.current) {
+    // A month not over: against the same days one year before.
+    const days = window.days;
+    pairs = zip(
+      energyOfDays(boxes, days, now, timeZone),
+      energyOfDays(boxes, days.map(back), now, timeZone),
+    );
+  } else if (window.period === 'month') {
+    pairs = zip(
+      energyOfMonths(boxes, [window.month], now, timeZone),
+      energyOfMonths(boxes, [back(window.month)], now, timeZone),
+    );
+  } else if (window.period === 'year') {
+    // A year not over: its complete months only.
+    const months = window.current ? window.months.slice(0, -1) : window.months;
+    pairs = zip(
+      energyOfMonths(boxes, months, now, timeZone),
+      energyOfMonths(boxes, months.map(back), now, timeZone),
+    );
+  } else {
     return null;
   }
-  const previousKwh = previous.reduce((total, wh) => total + wh, 0) / 1000;
+  // Like for like: only the days / months known on both sides.
+  const both = pairs.filter(([a, b]) => a.kwh !== null && b.kwh !== null);
+  if (both.length === 0) {
+    return null;
+  }
+  const current = both.reduce((total, [a]) => total + a.kwh, 0);
+  const previous = both.reduce((total, [, b]) => total + b.kwh, 0);
   return {
-    previousKey,
-    previousKwh,
-    ratio: previousKwh > 0 ? (figures.monthKwh - previousKwh) / previousKwh : null,
+    previousKwh: previous,
+    percent: previous > 0 ? Math.round(((current - previous) / previous) * 100) : null,
   };
 }
 
+const zip = (a, b) => a.map((entry, i) => [entry, b[i]]);
+
+const signed = (percent) => `${percent > 0 ? '+' : ''}${percent} %`;
+
 /**
  * Content of the history widget.
+ * @param {object} site
  * @param {Array<object>} boxes snapshots
- * @param {{ now: number, config: object, title: string|object, period: string }} options
+ * @param {{ now: number, config: object, title: string|object|null,
+ *   view?: { period: string, offset: number }, periods?: string[] }} options
  */
-export function historyContent(boxes, { now, config, title, period }) {
+export function historyContent(
+  site,
+  boxes,
+  { now, config, title, view = { period: 'month', offset: 0 }, periods = historyView().periods },
+) {
   const timeZone = config.timezone;
-  const daily = period === PERIODS.DAYS;
-  const series = daily
-    ? dailySeries(boxes, now, timeZone, 30)
-    : monthlySeries(boxes, now, timeZone, period === PERIODS.MONTHS_24 ? 24 : 12);
-  const known = series.filter((entry) => entry.kwh !== null);
+  const firstMonth = firstMonthOf(boxes);
+  const window = windowOf(view.period, view.offset, now, timeZone, {
+    firstYear: firstMonth?.slice(0, 4),
+  });
+  const energy = windowEnergy(site.store, boxes, window, now, timeZone);
+  const known = energy.entries.filter((entry) => entry.kwh !== null);
+  const label = labelText(window.label);
+
   const components = headingOf(title);
   if (known.length > 0) {
     components.push({
@@ -84,89 +137,74 @@ export function historyContent(boxes, { now, config, title, period }) {
         {
           name: T('Production', 'Production'),
           points: known.map((entry) => ({
-            t: daily ? dayInstant(entry.key) : monthInstant(entry.key),
+            t: entryInstant(window, entry.key),
             v: kwhValue(entry.kwh),
           })),
         },
       ],
       chart_type: 'bar',
-      title: daily ? T('Last 30 days', '30 derniers jours') : T('Per month', 'Par mois'),
+      title: T(`Production · ${label.en}`, `Production · ${label.fr}`),
       unit: 'kWh',
     });
   }
-  const total = known.reduce((sum, entry) => sum + entry.kwh, 0);
-  // The average leaves out the current day / month: it is not over yet.
-  const complete = known.filter(
-    (entry) => entry.key !== (daily ? dayKey(now, timeZone) : monthKey(now, timeZone)),
+
+  // The average leaves out the current day / month / year: not over yet.
+  const complete = energy.entries.filter(
+    (entry, i) => entry.kwh !== null && !(window.current && i === energy.entries.length - 1),
   );
   const average =
     complete.length > 0
       ? complete.reduce((sum, entry) => sum + entry.kwh, 0) / complete.length
       : null;
-  const top = best(known);
-  components.push(
-    tile(
-      kwhValue(known.length > 0 ? total : null),
-      'kWh',
-      T('Over the period', 'Sur la période'),
-      'layers',
-    ),
-    tile(
-      kwhValue(average),
-      'kWh',
-      daily
-        ? T('Per day (average)', 'Par jour (moyenne)')
-        : T('Per month (average)', 'Par mois (moyenne)'),
-      'activity',
-    ),
-    tile(
-      kwhValue(top?.kwh ?? null),
-      'kWh',
-      daily ? T('Best day', 'Meilleur jour') : T('Best month', 'Meilleur mois'),
-      'award',
-    ),
-  );
+  const best = known.reduce((top, entry) => (entry.kwh > (top?.kwh ?? -1) ? entry : top), null);
+  const comparison = yearOverYear(boxes, window, now, timeZone);
 
   const rows = [];
-  if (top) {
+  if (known.length === 0) {
     rows.push({
-      label: daily ? T('Best day', 'Meilleur jour') : T('Best month', 'Meilleur mois'),
+      label: T('Period', 'Période'),
+      icon: 'calendar',
+      value: T(`${label.en} · no data`, `${label.fr} · aucune donnée`),
+      color: WIDGET_COLORS.NEUTRAL,
+    });
+  }
+  if (best) {
+    const bestLabel = labelText(entryLabel(window, best.key));
+    rows.push({
+      label: T('Best', 'Meilleur'),
       icon: 'award',
-      value: daily
-        ? `${dayLabel(top.key)} · ${kwhText(top.kwh)}`
-        : T(
-            `${monthLabel(top.key).en} · ${kwhText(top.kwh)}`,
-            `${monthLabel(top.key).fr} · ${kwhText(top.kwh)}`,
-          ),
+      value: T(`${bestLabel.en} · ${kwhText(best.kwh)}`, `${bestLabel.fr} · ${kwhText(best.kwh)}`),
       color: WIDGET_COLORS.SUCCESS,
     });
   }
-  const comparison = yearOverYear(boxes, now, timeZone);
   if (comparison) {
-    const label = monthLabel(comparison.previousKey);
-    const percent = comparison.ratio === null ? null : Math.round(comparison.ratio * 100);
     rows.push({
-      label: T(`This month vs ${label.en}`, `Ce mois vs ${label.fr}`),
-      icon: percent !== null && percent < 0 ? 'trending-down' : 'trending-up',
+      label: T('One year before', 'Un an plus tôt'),
+      icon: comparison.percent !== null && comparison.percent < 0 ? 'trending-down' : 'trending-up',
       value:
-        percent === null
+        comparison.percent === null
           ? kwhText(comparison.previousKwh)
-          : `${percent > 0 ? '+' : ''}${percent} % · ${kwhText(comparison.previousKwh)}`,
-      color: percent !== null && percent < 0 ? WIDGET_COLORS.WARNING : WIDGET_COLORS.SUCCESS,
+          : `${signed(comparison.percent)} · ${kwhText(comparison.previousKwh)}`,
+      color:
+        comparison.percent !== null && comparison.percent < 0
+          ? WIDGET_COLORS.WARNING
+          : WIDGET_COLORS.SUCCESS,
     });
   }
   const ranking = boxes
-    .map((box) => ({ box, figures: boxFigures(box, now, timeZone) }))
-    .filter(({ figures }) => figures.monthKwh !== null)
-    .sort((a, b) => (b.figures.monthKwh ?? 0) - (a.figures.monthKwh ?? 0));
-  for (const { box, figures } of ranking.slice(0, 6)) {
-    const perKwp = figures.peakKw
-      ? ` · ${kwhValue(figures.monthKwh / figures.peakKw)} kWh/kWc`
-      : '';
+    .map((box) => ({
+      box,
+      kwh: windowEnergy(site.store, [box], window, now, timeZone).total,
+      peakKw: siteFigures([box], now, timeZone).peakKw,
+    }))
+    .filter((entry) => entry.kwh !== null)
+    .sort((a, b) => b.kwh - a.kwh);
+  for (const { box, kwh, peakKw } of ranking) {
+    const perKwp = peakKw ? ` · ${kwhValue(kwh / peakKw)} kWh/kWc` : '';
     rows.push({
       label: clip(box.name),
       icon: 'sun',
-      value: `${kwhText(figures.monthKwh)}${perKwp}`,
+      value: `${kwhText(kwh)}${perKwp}`,
       color: WIDGET_COLORS.NEUTRAL,
     });
   }
@@ -179,25 +217,55 @@ export function historyContent(boxes, { now, config, title, period }) {
     });
   }
   components.push({ type: 'status', items: fitRows(rows) });
+
+  components.push(...viewButtons(view, periods, hasPrevious(window, { now, firstMonth })));
+  const tiles = [
+    tile(kwhValue(energy.total), 'kWh', T('Production', 'Production'), 'layers'),
+    tile(kwhValue(average), 'kWh', PER_ENTRY[window.kind], 'activity'),
+    tile(kwhValue(best?.kwh ?? null), 'kWh', T('Best', 'Meilleur'), 'award'),
+  ];
+  if (comparison?.percent !== null && comparison?.percent !== undefined) {
+    tiles.push(
+      tile(
+        signed(comparison.percent),
+        null,
+        T('Vs one year before', 'Vs un an plus tôt'),
+        comparison.percent < 0 ? 'trending-down' : 'trending-up',
+      ),
+    );
+  }
+  components.push(...tiles.slice(0, Math.max(0, MAX_COMPONENTS - components.length)));
   return { ttl_seconds: 300, components };
 }
 
+const boxesOf = (all, settings) => {
+  const { boxes } = siteSelection(all, { devices: settings.devices });
+  return boxes.length > 0 ? boxes : all;
+};
+
 export const historyWidget = {
-  async get(_gladys, { settings = {}, site }) {
-    const config = site.config();
+  async get(_gladys, { settings = {}, site, views = sharedViews }) {
     const all = site.snapshots();
     if (all.length === 0) {
       return messageContent(site.lastRefreshAt() === null ? NOT_CONNECTED : NO_BOX);
     }
-    const { boxes } = siteSelection(all, { devices: settings.devices });
-    const period = Object.values(PERIODS).includes(settings.period)
-      ? settings.period
-      : PERIODS.DAYS;
-    return historyContent(boxes.length > 0 ? boxes : all, {
+    const spec = historyView(settings);
+    return historyContent(site, boxesOf(all, settings), {
       now: Date.now(),
-      config,
+      config: site.config(),
       title: titleOf(settings, null),
-      period,
+      view: views.get(HISTORY_WIDGET, settings, spec),
+      periods: spec.periods,
     });
+  },
+
+  async action(_gladys, { actionKey, settings = {}, values, site, views = sharedViews }) {
+    const view = views.apply(HISTORY_WIDGET, settings, historyView(settings), actionKey, values);
+    const firstMonth = firstMonthOf(boxesOf(site.snapshots(), settings));
+    return viewMessage(
+      windowOf(view.period, view.offset, Date.now(), site.config().timezone, {
+        firstYear: firstMonth?.slice(0, 4),
+      }),
+    );
   },
 };

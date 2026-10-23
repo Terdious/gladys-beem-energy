@@ -160,3 +160,62 @@ export function signalQuality(dbm) {
   }
   return Math.max(0, Math.min(100, Math.round(2 * (dbm + 100))));
 }
+
+/**
+ * Daily production of the boxes from a `/production/energy/intraday`
+ * payload (hourly Wh per device), summed per local day of `timeZone`.
+ *
+ * The devices are matched to the boxes by cloud id (`boxId`, `deviceId`,
+ * `id`) or serial number; a device matching no box (a battery, a house
+ * total) is reported in `unmatched` by its keys only, so the diagnostic can
+ * show the format without any value.
+ * @param {object} payload
+ * @param {Array<{ id: string, serialNumber: string|null }>} boxes
+ * @param {(at: number) => string} dayOf instant -> `YYYY-MM-DD`
+ * @returns {{ days: Map<string, Map<string, number>>, unmatched: Array<string> }}
+ */
+export function intradayDays(payload, boxes, dayOf) {
+  const list = Array.isArray(payload)
+    ? payload
+    : (payload?.devices ?? payload?.beemboxes ?? payload?.houses ?? []);
+  const byId = new Map(boxes.map((box) => [box.id, box.id]));
+  for (const box of boxes) {
+    if (box.serialNumber) {
+      byId.set(box.serialNumber.toUpperCase(), box.id);
+    }
+  }
+  const days = new Map();
+  const unmatched = [];
+  for (const device of Array.isArray(list) ? list : []) {
+    const candidates = [
+      device?.boxId,
+      device?.deviceId,
+      device?.beemboxId,
+      device?.id,
+      device?.serialNumber,
+    ]
+      .filter((value) => value !== undefined && value !== null)
+      .map((value) => String(value).trim().toUpperCase());
+    const id = candidates.map((candidate) => byId.get(candidate)).find(Boolean);
+    if (!id) {
+      unmatched.push(
+        Object.keys(device ?? {})
+          .sort()
+          .join(','),
+      );
+      continue;
+    }
+    const totals = days.get(id) ?? new Map();
+    for (const measure of device.measures ?? device.data ?? []) {
+      const at = toTimestamp(measure?.startDate ?? measure?.date ?? measure?.start);
+      const wh = firstNumber(measure, ['value', 'energy', 'wh']);
+      if (at === null || wh === null || wh < 0) {
+        continue;
+      }
+      const key = dayOf(at);
+      totals.set(key, (totals.get(key) ?? 0) + wh);
+    }
+    days.set(id, totals);
+  }
+  return { days, unmatched };
+}

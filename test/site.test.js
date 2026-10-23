@@ -5,7 +5,7 @@ import { boxIds } from '../src/devices/box.js';
 import { STORE_SAVE_INTERVAL_MS } from '../src/site.js';
 import { createStore } from '../src/store.js';
 import { setupSite, tempDir } from './helpers/setup.js';
-import { summary, threePhaseBoxes } from './helpers/fakeBeem.js';
+import { intraday, summary, threePhaseBoxes } from './helpers/fakeBeem.js';
 
 // 19 October 2026, 12:00 in Paris (UTC+2).
 const NOON = Date.parse('2026-10-19T10:00:00.000Z');
@@ -210,4 +210,48 @@ test('the widgets are nudged after a refresh listener runs', async () => {
   });
   await site.refresh();
   assert.equal(calls, 1);
+});
+
+test('the daily history is backfilled from the hourly production, each week once', async () => {
+  const { site, beem } = await setupSite({
+    at: NOON,
+    boxes: threePhaseBoxes().slice(0, 2),
+    summaries: {
+      '2026-10': [
+        summary({ boxId: 101, day: 1500, month: 40000, at: NOON }),
+        summary({ boxId: 102, day: 1200, month: 30000, at: NOON }),
+      ],
+      '2026-09': [summary({ boxId: 101, month: 90000, at: NOON })],
+    },
+    config: { history_months: 1 },
+  });
+  beem.state.intraday = intraday([101, 102], 100);
+  await site.refresh();
+  await site.backfillHistory();
+  const intradayCalls = beem.callsTo('/production/energy/intraday');
+  // 1 month of history: 31 days, 4 weeks of 7 days.
+  assert.equal(intradayCalls.length, 4);
+  assert.equal(intradayCalls[0].query.scale, 'PT60M');
+  assert.equal(intradayCalls[0].query.from, '2026-10-11T22:00:00.000Z');
+  const { days } = site.store.history('101');
+  assert.equal(days['2026-10-18'], 1000, '10 hours of 100 Wh');
+  assert.equal(days['2026-10-19'], 1500, 'the live day keeps the summary total');
+  assert.equal(Object.keys(days).length, 29);
+
+  await site.backfillHistory();
+  assert.equal(beem.callsTo('/production/energy/intraday').length, 4, 'each week once');
+});
+
+test('an intraday payload matching no box stops the backfill and is diagnosed', async () => {
+  const { site, beem } = await setupSite({
+    at: NOON,
+    boxes: threePhaseBoxes().slice(0, 1),
+    summaries: { '2026-10': [summary({ boxId: 101, month: 40000, at: NOON })] },
+    config: { history_months: 2 },
+  });
+  beem.state.intraday = () => ({ devices: [{ houseId: 9, measures: [] }] });
+  await site.refresh();
+  await site.backfillHistory();
+  assert.equal(beem.callsTo('/production/energy/intraday').length, 1);
+  assert.deepEqual(site.dayHistory().unmatched, ['houseId,measures']);
 });

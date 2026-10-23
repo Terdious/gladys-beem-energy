@@ -653,8 +653,8 @@
         "fr": "Installation solaire"
       },
       "description": {
-        "en": "The whole installation, single-phase or per phase (L1, L2, L3): curve, totals, alerts.",
-        "fr": "Toute l'installation, monophasée ou par phase (L1, L2, L3) : courbe, totaux, alertes."
+        "en": "The whole installation over 12 h, a day, week, month or year, per phase (L1, L2, L3).",
+        "fr": "Toute l'installation sur 12 h, un jour, semaine, mois ou année, par phase (L1, L2, L3)."
       },
       "icon": "grid",
       "settings": [
@@ -774,8 +774,8 @@
         "fr": "Économies solaires"
       },
       "description": {
-        "en": "Savings today, month, year and in total, payback and CO2 avoided (estimate).",
-        "fr": "Économies du jour, du mois, de l'année et au total, amortissement et CO2 évité (estimation)."
+        "en": "Savings per month, year or all years, browsable, payback and CO2 avoided (estimate).",
+        "fr": "Économies par mois, année ou toutes années, navigables, amortissement et CO2 évité (estimation)."
       },
       "icon": "trending-up",
       "settings": [
@@ -813,8 +813,8 @@
         "fr": "Historique de production"
       },
       "description": {
-        "en": "Bars per day or per month, records, comparison with last year, ranking of the boxes.",
-        "fr": "Barres par jour ou par mois, records, comparaison avec l'an dernier, classement des box."
+        "en": "Bars per day, month or year, browsable: records, last year, ranking of the boxes.",
+        "fr": "Barres par jour, mois ou année, navigables : records, an dernier, classement des box."
       },
       "icon": "bar-chart-2",
       "settings": [
@@ -834,8 +834,8 @@
           "key": "period",
           "type": "select",
           "label": {
-            "en": "Period",
-            "fr": "Période"
+            "en": "Default period",
+            "fr": "Période par défaut"
           },
           "required": true,
           "default": "days",
@@ -843,25 +843,29 @@
             {
               "value": "days",
               "label": {
-                "en": "Last 30 days",
-                "fr": "30 derniers jours"
+                "en": "Month (bars per day)",
+                "fr": "Mois (barres par jour)"
               }
             },
             {
               "value": "months_12",
               "label": {
-                "en": "Last 12 months",
-                "fr": "12 derniers mois"
+                "en": "Year (bars per month)",
+                "fr": "Année (barres par mois)"
               }
             },
             {
               "value": "months_24",
               "label": {
-                "en": "Last 24 months",
-                "fr": "24 derniers mois"
+                "en": "Year (bars per month)",
+                "fr": "Année (barres par mois)"
               }
             }
-          ]
+          ],
+          "description": {
+            "en": "The period shown first; the Period button of the widget changes it live.",
+            "fr": "La période affichée d'abord ; le bouton Période du widget la change en direct."
+          }
         },
         {
           "key": "devices",

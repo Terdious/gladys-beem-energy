@@ -6,6 +6,7 @@ import { validateWidgetContent } from '@gladysassistant/integration-sdk';
 import { boxContent, compassOf, cutsRow } from '../src/dashboard/box.js';
 import { siteSelection } from '../src/dashboard/common.js';
 import { historyContent, yearOverYear } from '../src/dashboard/history.js';
+import { createViews, windowOf } from '../src/dashboard/period.js';
 import { savingsContent } from '../src/dashboard/savings.js';
 import { phaseBalance, siteContent } from '../src/dashboard/site.js';
 import { boxIds } from '../src/devices/box.js';
@@ -112,7 +113,8 @@ test('three-phase: one row per phase and the phase balance', async () => {
     showChart: false,
   });
   const labels = statusOf(content).items.map((item) => text(item.label));
-  assert.ok(labels[0].startsWith('L1 (2) · 1.9 kWc'));
+  assert.equal(labels[0], 'Period', 'without a chart, the period is a row');
+  assert.ok(labels[1].startsWith('L1 (2) · 1.9 kWc'));
   assert.ok(labels.includes('Phase balance'));
   const balance = phaseBalance(selection.phases, NOON, 'Europe/Paris', 500);
   assert.equal(balance.warning, false);
@@ -171,20 +173,26 @@ test('the savings widget asks for a tariff when there is none', async () => {
   assert.match(content.components[0].text.en, /electricity price/);
 });
 
-test('the history widget, per day and per month, is rendered exactly as sent', async () => {
+test('the history widget, per month, year and all years, is rendered exactly as sent', async () => {
   const { site } = await producingSite();
-  for (const period of ['days', 'months_12', 'months_24']) {
-    const content = historyContent(site.snapshots(), {
-      now: NOON,
-      config: site.config(),
-      title: 'History',
-      period,
-    });
-    assert.deepEqual(validateWidgetContent(content), [], period);
+  for (const period of ['month', 'year', 'all']) {
+    for (const offset of [0, -1, -12]) {
+      const content = historyContent(site, site.snapshots(), {
+        now: NOON,
+        config: site.config(),
+        title: null,
+        view: { period, offset },
+      });
+      assert.deepEqual(validateWidgetContent(content), [], `${period} ${offset}`);
+    }
   }
-  const comparison = yearOverYear(site.snapshots(), NOON, 'Europe/Paris');
-  assert.equal(comparison.previousKey, '2025-10');
-  assert.equal(comparison.previousKwh, 360);
+  // October 2026 against October 2025, both months known.
+  const window = windowOf('month', -12, NOON, 'Europe/Paris');
+  assert.equal(window.label.en, 'Oct 2025');
+  const october = windowOf('month', 0, NOON, 'Europe/Paris');
+  assert.equal(yearOverYear(site.snapshots(), october, NOON, 'Europe/Paris'), null);
+  const year = windowOf('year', 0, NOON, 'Europe/Paris');
+  assert.equal(yearOverYear(site.snapshots(), year, NOON, 'Europe/Paris'), null);
 });
 
 test('every widget answers before the first connection to the cloud', async () => {
@@ -273,5 +281,95 @@ test('the site, savings and history widgets repeat no default title', async () =
     );
     const titled = await WIDGETS[key].get(gladys, { settings: { title: 'Mine' }, site });
     assert.equal(titled.components[0].text, 'Mine');
+  }
+});
+
+test('the site widget fits the core budget for every period, live or past', async () => {
+  const { gladys, site } = await producingSite();
+  for (const settings of [{}, threePhaseSettings(gladys), { title: 'Mine', show_chart: false }]) {
+    for (const period of ['hours_12', 'day', 'week', 'month', 'year']) {
+      for (const offset of [0, -1]) {
+        const content = siteContent(site, siteSelection(site.snapshots(), settings), {
+          now: NOON,
+          config: site.config(),
+          title: settings.title ?? null,
+          threshold: 500,
+          showChart: settings.show_chart !== false,
+          view: { period, offset },
+        });
+        assert.deepEqual(validateWidgetContent(content), [], `${period} ${offset}`);
+        assert.ok(content.components.length <= 8);
+        const buttons = content.components.filter((component) => component.type === 'button');
+        assert.equal(buttons[0].action.key, 'period');
+        assert.equal(
+          buttons.some((button) => button.action.key === 'next'),
+          offset < 0,
+        );
+      }
+    }
+  }
+});
+
+test('the site widget: live tiles on the current day, period tiles on a week', async () => {
+  const { site } = await producingSite();
+  const labelsOf = (view) =>
+    siteContent(site, siteSelection(site.snapshots(), {}), {
+      now: NOON,
+      config: site.config(),
+      title: null,
+      threshold: 500,
+      showChart: true,
+      view,
+    })
+      .components.filter((component) => component.type === 'value')
+      .map((component) => text(component.label));
+  assert.deepEqual(labelsOf({ period: 'day', offset: 0 }).slice(0, 2), ['Power', 'Today']);
+  assert.deepEqual(labelsOf({ period: 'week', offset: 0 }).slice(0, 2), [
+    'Production',
+    'Per day (average)',
+  ]);
+});
+
+test('the period buttons change the view and the content follows', async () => {
+  const { gladys, site } = await producingSite();
+  const views = createViews();
+  const settings = { layout: 'single_phase' };
+  const message = await WIDGETS.site.action(gladys, {
+    actionKey: 'period',
+    settings,
+    values: { period: 'month' },
+    site,
+    views,
+  });
+  assert.match(message.fr, /Affichage : /);
+  await WIDGETS.site.action(gladys, { actionKey: 'previous', settings, site, views });
+  const content = await WIDGETS.site.get(gladys, { settings, site, views });
+  const buttons = content.components.filter((component) => component.type === 'button');
+  assert.ok(buttons.some((button) => button.action.key === 'next'));
+  for (const key of ['history', 'savings']) {
+    await WIDGETS[key].action(gladys, {
+      actionKey: 'period',
+      settings,
+      values: { period: 'year' },
+      site,
+      views,
+    });
+    const view = await WIDGETS[key].get(gladys, { settings, site, views });
+    assert.deepEqual(validateWidgetContent(view), [], key);
+  }
+});
+
+test('the savings widget fits the core budget for every period', async () => {
+  const { site } = await producingSite();
+  for (const period of ['month', 'year', 'all']) {
+    for (const offset of [0, -1]) {
+      const content = savingsContent(site, site.snapshots(), {
+        now: NOON,
+        config: site.config(),
+        title: null,
+        view: { period, offset },
+      });
+      assert.deepEqual(validateWidgetContent(content), [], `${period} ${offset}`);
+    }
   }
 });

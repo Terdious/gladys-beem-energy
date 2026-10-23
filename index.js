@@ -86,8 +86,15 @@ for (const [actionKey, handler] of Object.entries(SCENE_ACTIONS)) {
 }
 
 // --- Dashboard widgets (Gladys 5.1+) ------------------------------------------
+// The site, savings and history widgets answer their period buttons
+// (src/dashboard/period.js): the core refreshes the widget after the action.
 for (const [widgetKey, widget] of Object.entries(WIDGETS)) {
   gladys.onWidgetGet(widgetKey, (request) => widget.get(gladys, { ...request, site }));
+  if (typeof widget.action === 'function') {
+    gladys.onWidgetAction(widgetKey, (actionKey, params, { settings, values }) =>
+      widget.action(gladys, { actionKey, params, settings, values, site }),
+    );
+  }
 }
 
 // --- Connection lifecycle ----------------------------------------------------

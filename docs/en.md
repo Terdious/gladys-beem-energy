@@ -37,10 +37,11 @@ Every box of the account becomes a Gladys device, with:
   total, and asks for the final total of the previous month on a month change.
   Nothing is lost at midnight, nor during a container downtime: the next reading
   catches up the missed production.
-- **Monthly history**: at startup, the integration asks the Beem cloud for the
+- **History**: at startup, the integration asks the Beem cloud for the
   production of the past months (24 by default, one request every few seconds,
-  once per month: a past month never changes). The year, lifetime, savings and
-  payback figures start there.
+  once per month: a past month never changes), then of the past days (hourly
+  history, one week per request). The year, lifetime, savings and payback
+  figures and the browsing of the widgets start there.
 - The transport badge reads **cloud** for a box present in the cloud summary,
   **unreachable** for a box missing from it.
 
@@ -87,21 +88,46 @@ Four widgets, added from **Dashboard → Edit → Add a widget**:
   since the first month known.
 - **Solar installation**: the whole installation, **single-phase** (the boxes
   chosen, or all of them) or **three-phase**: assign the boxes of each phase
-  (L1, L2, L3) in the widget settings. Power curve of the day (one curve per
-  phase in three-phase), power, day, month, year, share of the peak power, one
-  row per phase (power · production of the day), the **phase balance** (in
-  warning past the threshold set, 500 W by default), the silent or low-yield
-  boxes, and the assignment mistakes (a box in two phases, or in none).
-- **Solar savings**: savings of the day, the month, the year and in total,
-  **payback** gauge and date, value of one solar kWh, self-consumed and exported
-  shares, CO2 avoided, and the savings of the last 12 months.
-- **Production history**: bars of the last 30 days, or of the last 12 or 24
-  months; total and average of the period, best day or month, the current month
-  against the same month last year, ranking of the boxes this month (with their
-  yield per kWp).
+  (L1, L2, L3) in the widget settings. Periods: **12 hours** and **day** (power
+  curve, one curve per phase in three-phase), **week** and **month** (production
+  per day), **year** (production per month). On the current day: power, day,
+  month, year, share of the peak power, one row per phase (power · production of
+  the day), the **phase balance** (in warning past the threshold set, 500 W by
+  default), the silent or low-yield boxes. On another period: production, peak
+  power or average per day, best day, yield per kWp and the share of each phase.
+  The assignment mistakes (a box in two phases, or in none) always show.
+- **Solar savings**: savings per **month** (bars per day), per **year** (per
+  month) or over **all the years**; savings and production of the period,
+  **payback** gauge and date, total since the start, value of one solar kWh,
+  self-consumed and exported shares of the period, CO2 avoided.
+- **Production history**: production per **month** (bars per day), per **year**
+  (per month) or over **all the years**; production, average and best day /
+  month / year of the period, comparison with **the same period one year
+  before** (same days or months), ranking of the boxes over the period (with
+  their yield per kWp). The **Default period** setting picks the period shown
+  first.
 
-> The days of the history accumulate from the installation of the integration
-> on: the Beem cloud gives the history month by month only.
+### Changing the period and browsing
+
+Like on the charts of Gladys, the Installation, Savings and History widgets have
+their buttons:
+
+- **Period** (the name of the period shown): opens a choice of the periods of
+  the widget. Goes back to the current period.
+- **Previous** / **Next**: steps back or forward by one period (day, week,
+  month, year…). Previous shows only when there is data before, Next once
+  stepped back.
+
+The period shows in the chart title. It is kept per widget (per settings) while
+the integration runs: two dashboards showing the same widget with the same
+settings share their period, and a restart goes back to the default period. On a
+Gladys older than 5.2, the Period button simply goes to the next period.
+
+> Data: the power curves are kept **14 days** (5-minute averages). The **daily**
+> production of the past days is fetched at startup from the hourly history of
+> the Beem application (up to 400 days, one week per request); the **Diagnose
+> the boxes** action tells how many days each box has. The months come from the
+> monthly history.
 
 ### Example: 3 phases, 6 boxes
 

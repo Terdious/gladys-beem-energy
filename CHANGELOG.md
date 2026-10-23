@@ -10,6 +10,29 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- Site, history and savings widgets: a **Period** button (a form with the
+  periods of the widget on Gladys 5.2+, the next period on an older core) and
+  **Previous** / **Next** buttons to browse the past periods, like the charts
+  of the core. Site: 12 hours, day (power curves), week, month (production per
+  day), year (per month); history and savings: month (per day), year (per
+  month), all the years (per year). Tiles and rows follow the period; the
+  history compares it with the same period one year before, like for like
+  ([#3](https://github.com/Terdious/gladys-beem-energy/issues/3)).
+- Daily history of the past days, fetched at startup from the hourly
+  production of the Beem application (up to 400 days, one week per request,
+  each week once); the **Diagnose the boxes** action tells how many days each
+  box has ([#3](https://github.com/Terdious/gladys-beem-energy/issues/3)).
+
+### Changed
+
+- The 5-minute power averages are kept 14 days instead of 48 hours (the curves
+  of the past days).
+- History widget: the **Period** setting becomes the **Default period**
+  (`days` → month, `months_12` / `months_24` → year)
+  ([#3](https://github.com/Terdious/gladys-beem-energy/issues/3)).
+
 ## [1.1.0] - 2026-10-19
 
 ### Added
